@@ -1,0 +1,9 @@
+# Capstone Project
+
+Repositori utama untuk proyek Capstone.
+
+## Struktur Folder
+- `/frontend` : UI menggunakan React
+- `/backend`  : API menggunakan FastAPI
+- `/scraper`  : Script pengumpulan data metadata jurnal
+- `/ai_training`: Eksperimen dan training model klasifikasi SVM
