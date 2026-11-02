@@ -1,5 +1,12 @@
-venv/
+﻿venv/
 __pycache__/
 *.pyc
 .env
 *.log
+exports/
+backup/
+data/
+scrape_log*.txt
+backfill_log*.txt
+audit_log*.txt
+schema_dump.sql
