@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.append(os.getcwd())
+
 from db.session import SessionLocal
 from db.upsert import backfill_subject
 from scraper.sinta_scraper import scrape_listing
@@ -16,7 +20,7 @@ def run_backfill():
     try:
         logger.info("Scraping ulang listing untuk mengambil subject...")
 
-        listing = scrape_listing(max_pages=1)
+        listing = scrape_listing(max_pages=None)
 
         logger.info(
             f"Listing selesai: {len(listing)} jurnal. "

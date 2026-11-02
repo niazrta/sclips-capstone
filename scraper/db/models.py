@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, BigInteger, String, Boolean, Integer,
-    ForeignKey, DateTime, Enum, Text, func
+    ForeignKey, DateTime, Enum, Text, func, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 import enum
@@ -25,6 +25,7 @@ class Publisher(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)          # hasil normalisasi
     raw_name = Column(String, nullable=True)        # nama asli dari SINTA
+    sinta_publisher_id = Column(BigInteger, nullable=True)
     type = Column(String, nullable=True)             # diisi ML: HEI/GOV/SOC/COM
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -36,7 +37,7 @@ class Publisher(Base):
 class Journal(Base):
     __tablename__ = "journals"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, autoincrement=False)
     publisher_id = Column(BigInteger, ForeignKey("publishers.id"), nullable=True)
     name = Column(String, nullable=False)
     e_issn = Column(String, nullable=True)
@@ -64,6 +65,7 @@ class JournalRankHistory(Base):
     scraped_at = Column(DateTime(timezone=True), server_default=func.now())
 
     journal = relationship("Journal", back_populates="rank_histories")
+    __table_args__ = (UniqueConstraint("journal_id", "accreditation_year", name="uq_journal_year"),)
 
 
 class ScrapingLog(Base):

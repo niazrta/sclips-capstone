@@ -22,18 +22,24 @@ session = requests.Session()
 session.headers.update(HEADERS)
 
 
-def _safe_get(url: str):
-    """Request dengan timeout + graceful degradation. Return None kalau gagal."""
-    try:
-        resp = session.get(url, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        return resp.text
-    except requests.exceptions.Timeout:
-        logger.warning(f"Timeout saat akses {url}")
-    except requests.exceptions.HTTPError as e:
-        logger.warning(f"HTTP error {e} saat akses {url}")
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"Request gagal untuk {url}: {e}")
+def _safe_get(url: str, max_retries: int = 3):
+    """Request dengan timeout + retry + graceful degradation."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = session.get(url, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            return resp.text
+        except requests.exceptions.Timeout:
+            logger.warning(f"Timeout percobaan {attempt}/{max_retries} untuk {url}")
+        except requests.exceptions.HTTPError as e:
+            logger.warning(f"HTTP error {e} percobaan {attempt}/{max_retries} untuk {url}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Request gagal percobaan {attempt}/{max_retries} untuk {url}: {e}")
+
+        if attempt < max_retries:
+            time.sleep(3)
+
+    logger.error(f"Gagal ambil {url} setelah {max_retries} percobaan")
     return None
 
 
