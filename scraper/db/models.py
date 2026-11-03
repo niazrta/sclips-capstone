@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, BigInteger, String, Boolean, Integer,
-    ForeignKey, DateTime, Enum, Text, func, UniqueConstraint
+    ForeignKey, DateTime, Enum, Text, Numeric, func, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 import enum
@@ -50,6 +50,20 @@ class Journal(Base):
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+        # Data tambahan dari listing SINTA
+    website = Column(Text, nullable=True)
+    editor_url = Column(Text, nullable=True)
+    google_scholar_url = Column(Text, nullable=True)
+    garuda_id = Column(BigInteger, nullable=True)
+    cover_url = Column(Text, nullable=True)
+    rank_badge = Column(String, nullable=True)
+    scopus_indexed = Column(Boolean, nullable=True)
+    garuda_indexed = Column(Boolean, nullable=True)
+    impact = Column(Numeric(10, 2), nullable=True)
+    h5_index = Column(Integer, nullable=True)
+    citations_5yr = Column(Integer, nullable=True)
+    citations = Column(Integer, nullable=True)
+    metrics_updated_at = Column(DateTime(timezone=True), nullable=True)
 
     publisher = relationship("Publisher", back_populates="journals")
     rank_histories = relationship("JournalRankHistory", back_populates="journal")

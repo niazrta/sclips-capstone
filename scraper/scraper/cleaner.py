@@ -39,11 +39,26 @@ def validate_issn(issn: str) -> bool:
     issn = issn.strip().upper()
     return bool(re.match(r"^\d{4}-?\d{3}[\dxX]$", issn))
 
+def issn_check_char(d7: str) -> str:
+    total = sum(
+        int(c) * w
+        for c, w in zip(d7, range(8, 1, -1))
+    )
+    r = (11 - total % 11) % 11
+    return "X" if r == 10 else str(r)
+
 
 def clean_issn(issn: str) -> str | None:
     if not issn:
         return None
-    issn = issn.strip().upper().replace("-", "")
-    if not re.match(r"^\d{7}[\dX]$", issn):
+
+    s = re.sub(r"[\s-]", "", issn.strip().upper())
+
+    # Memulihkan ISSN 7 digit yang check digit-nya X
+    if re.fullmatch(r"\d{7}", s) and issn_check_char(s) == "X":
+        s += "X"
+
+    if not re.fullmatch(r"\d{7}[\dX]", s):
         return None
-    return f"{issn[:4]}-{issn[4:]}"
+
+    return f"{s[:4]}-{s[4:]}"

@@ -21,6 +21,72 @@ REQUEST_TIMEOUT = 15
 session = requests.Session()
 session.headers.update(HEADERS)
 
+def parse_id_number(s):
+    """Format Indonesia: '14.902' -> 14902.0 ; '104,00' -> 104.0 ; selain itu None."""
+    s = (s or "").strip()
+
+    if not re.fullmatch(r"\d{1,3}(\.\d{3})+(,\d+)?|\d+(,\d+)?", s):
+        return None
+
+    return float(s.replace(".", "").replace(",", "."))
+
+
+def parse_listing_extras(item) -> dict:
+    """Ekstrak field tambahan dari item listing SINTA."""
+    out = {"garuda_id": None}
+
+    # URL Google Scholar, Website, dan Editor URL
+    links = {
+        a.get_text(strip=True): a["href"]
+        for a in item.select("div.affil-abbrev a[href]")
+    }
+
+    out["google_scholar_url"] = links.get("Google Scholar")
+    out["website"] = links.get("Website")
+    out["editor_url"] = links.get("Editor URL")
+
+    # Garuda ID
+    for a in item.select("a[href]"):
+        m = re.search(r"garuda\.[^/]+/journal/view/(\d+)", a["href"])
+        if m:
+            out["garuda_id"] = int(m.group(1))
+            break
+
+    # Status indeksasi
+    out["garuda_indexed"] = item.select_one("span.garuda-indexed") is not None
+    out["scopus_indexed"] = item.select_one("span.scopus-indexed") is not None
+
+    # Rank badge
+    acc = item.select_one("span.num-stat.accredited")
+    m = re.match(r"(S[1-6]|NA)\b", acc.get_text(" ", strip=True)) if acc else None
+    out["rank_badge"] = m.group(1) if m else None
+
+    # Cover URL
+    img = item.select_one("img.journal-cover")
+    out["cover_url"] = img.get("src") if img else None
+
+    # Metrik jurnal
+    raw = {}
+
+    for num in item.select("div.pr-num"):
+        lab = num.find_next_sibling("div", class_="pr-txt")
+        if lab:
+            raw[lab.get_text(strip=True)] = num.get_text(strip=True)
+
+    out["impact"] = parse_id_number(raw.get("Impact"))
+
+    for label, key in (
+        ("H5-index", "h5_index"),
+        ("Citations 5yr", "citations_5yr"),
+        ("Citations", "citations"),
+    ):
+        v = parse_id_number(raw.get(label))
+        out[key] = int(v) if v is not None else None
+
+    out["raw_stats"] = raw
+
+    return out
+
 
 def _safe_get(url: str, max_retries: int = 3):
     """Request dengan timeout + retry + graceful degradation."""
@@ -70,8 +136,8 @@ def parse_listing_page(html: str) -> list[dict]:
             )
             subject = subject_match.group(1).strip() if subject_match else None
 
-            p_issn_match = re.search(r"P-ISSN\s*:\s*([\d-]+)", profile_id_text)
-            e_issn_match = re.search(r"E-ISSN\s*:\s*([\d-]+)", profile_id_text)
+            p_issn_match = re.search(r"P-ISSN\s*:\s*(?:[PE]\s*)?(\d{4}[\s-]*\d{3}[\dXx]|[\dXx-]+)", profile_id_text)
+            e_issn_match = re.search(r"E-ISSN\s*:\s*(?:[PE]\s*)?(\d{4}[\s-]*\d{3}[\dXx]|[\dXx-]+)", profile_id_text)
             p_issn = p_issn_match.group(1) if p_issn_match else None
             e_issn = e_issn_match.group(1) if e_issn_match else None
 
@@ -88,6 +154,7 @@ def parse_listing_page(html: str) -> list[dict]:
                 "subject": subject,
                 "p_issn": p_issn,
                 "e_issn": e_issn,
+                **parse_listing_extras(item),
             })
         except Exception as e:
             logger.error(f"Gagal parsing satu item listing: {e}")
@@ -98,6 +165,11 @@ def parse_listing_page(html: str) -> list[dict]:
 
 def parse_detail_page(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
+
+    # Penanda halaman profil jurnal (dari HTML profil yang sudah kita inspeksi)
+    if soup.select_one("div.meta-profile") is None or soup.select_one("h3") is None:
+        raise ValueError("Halaman bukan profil jurnal: penanda profil tidak ditemukan")
+
     detail = {
         "current_rank": None,
         "website": None,
@@ -107,44 +179,38 @@ def parse_detail_page(html: str) -> dict:
     }
 
     # --- Website ---
-    try:
-        for a in soup.find_all("a"):
-            if a.get_text(strip=True) == "Website" and a.has_attr("href"):
-                detail["website"] = a["href"]
-                break
-    except Exception as e:
-        logger.warning(f"Gagal ambil website: {e}")
+    for a in soup.find_all("a"):
+        if a.get_text(strip=True) == "Website" and a.has_attr("href"):
+            detail["website"] = a["href"]
+            break
 
-    # --- Tabel akreditasi: gabungkan kolom tahun dengan kolom rank per index ---
-    try:
-        table = soup.select_one("table.table-borderless")
-        if table:
-            rows = table.select("tr")
-            if len(rows) >= 2:
-                year_cells = rows[0].select("td")
-                rank_cells = rows[-1].select("td")  # baris data (terakhir kalau >1 baris)
+    # --- Tabel akreditasi (opsional: jurnal baru bisa belum punya) ---
+    table = soup.select_one("table.table-borderless")
+    if table is None:
+        return detail  # profil sah, riwayat kosong
 
-                years = []
-                for yc in year_cells:
-                    txt = yc.get_text(strip=True)
-                    years.append(int(txt) if txt.isdigit() else None)
+    rows = table.select("tr")
+    if len(rows) < 2:
+        raise ValueError("Struktur tabel akreditasi tidak sesuai")
 
-                history = []
-                for i, rc in enumerate(rank_cells):
-                    if i >= len(years) or years[i] is None:
-                        continue
-                    title = rc.get("title", "")
-                    match = re.search(r"Sinta\s*(\d)", title, re.IGNORECASE)
-                    if match:
-                        history.append({"year": years[i], "rank": f"S{match.group(1)}"})
+    years = []
+    for yc in rows[0].select("td"):
+        txt = yc.get_text(strip=True)
+        years.append(int(txt) if txt.isdigit() else None)
 
-                detail["accreditation_history"] = history
-                if history:
-                    detail["current_rank"] = history[-1]["rank"]  # tahun terakhir = current
-                    detail["accreditation_year_start"] = history[0]["year"]
-                    detail["accreditation_year_end"] = history[-1]["year"]
-    except Exception as e:
-        logger.warning(f"Gagal ambil accreditation table: {e}")
+    history = []
+    for i, rc in enumerate(rows[-1].select("td")):
+        if i >= len(years) or years[i] is None:
+            continue
+        match = re.search(r"Sinta\s*(\d)", rc.get("title", ""), re.IGNORECASE)
+        if match:
+            history.append({"year": years[i], "rank": f"S{match.group(1)}"})
+
+    if history:
+        detail["accreditation_history"] = history
+        detail["current_rank"] = history[-1]["rank"]
+        detail["accreditation_year_start"] = history[0]["year"]
+        detail["accreditation_year_end"] = history[-1]["year"]
 
     return detail
 
