@@ -4,6 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 from config import config
 from utils.logger import get_logger
+from scraper.cleaner import collapse_spaces, classify_issn
 
 logger = get_logger("sinta_scraper")
 
@@ -20,6 +21,7 @@ REQUEST_TIMEOUT = 15
 
 session = requests.Session()
 session.headers.update(HEADERS)
+
 
 def parse_id_number(s):
     """Format Indonesia: '14.902' -> 14902.0 ; '104,00' -> 104.0 ; selain itu None."""
@@ -109,51 +111,55 @@ def _safe_get(url: str, max_retries: int = 3):
     return None
 
 
+ISSN_PATTERNS = {
+    "p": r"P-ISSN\s*:\s*(.*?)\s*(?:\||E-ISSN|Subject Area|$)",
+    "e": r"E-ISSN\s*:\s*(.*?)\s*(?:\||P-ISSN|Subject Area|$)",
+}
+
+
+def _id_from(href):
+    """ID angka dari tautan .../profile/{id}. Tidak bergantung pada nama domain."""
+    m = re.search(r"/profile/(\d+)", href or "")
+    return int(m.group(1)) if m else None
+
+
 def parse_listing_page(html: str) -> list[dict]:
-    """Ekstrak semua jurnal dari satu halaman listing."""
+    """Ekstrak semua jurnal dari satu halaman listing, apa adanya dari SINTA."""
     soup = BeautifulSoup(html, "html.parser")
-    items = soup.select("div.list-item.row.mt-3")
     results = []
 
-    for item in items:
+    for item in soup.select("div.list-item.row.mt-3"):
         try:
             name_tag = item.select_one("div.affil-name > a")
-            name = name_tag.text.strip() if name_tag else None
-            profile_url = name_tag["href"] if name_tag and name_tag.has_attr("href") else None
-            sinta_journal_id = profile_url.rstrip("/").split("/")[-1] if profile_url else None
-
-            loc_tag = item.select_one("div.affil-loc > a")
-            publisher_name = loc_tag.text.strip() if loc_tag else None
-            publisher_url = loc_tag["href"] if loc_tag and loc_tag.has_attr("href") else None
-            sinta_publisher_id = publisher_url.rstrip("/").split("/")[-1] if publisher_url else None
-
-            profile_id_div = item.select_one("div.profile-id")
-            profile_id_text = profile_id_div.text if profile_id_div else ""
-
-            subject_match = re.search(
-                r"Subject Area\s*:\s*(.*?)\s*(?:P-ISSN|E-ISSN|$)",
-                profile_id_text, re.IGNORECASE | re.DOTALL
-            )
-            subject = subject_match.group(1).strip() if subject_match else None
-
-            p_issn_match = re.search(r"P-ISSN\s*:\s*(?:[PE]\s*)?(\d{4}[\s-]*\d{3}[\dXx]|[\dXx-]+)", profile_id_text)
-            e_issn_match = re.search(r"E-ISSN\s*:\s*(?:[PE]\s*)?(\d{4}[\s-]*\d{3}[\dXx]|[\dXx-]+)", profile_id_text)
-            p_issn = p_issn_match.group(1) if p_issn_match else None
-            e_issn = e_issn_match.group(1) if e_issn_match else None
-
-            if not name or not profile_url:
-                logger.warning("Item listing dilewati: nama/URL profil tidak ditemukan")
+            journal_id = _id_from(name_tag.get("href")) if name_tag else None
+            name = collapse_spaces(name_tag.get_text()) if name_tag else None
+            if not name or journal_id is None:
+                logger.warning("Item listing dilewati: nama atau ID jurnal tidak terbaca")
                 continue
 
+            loc_tag = item.select_one("div.affil-loc > a")
+            publisher_name = collapse_spaces(loc_tag.get_text()) if loc_tag else None
+            affiliation_id = _id_from(loc_tag.get("href")) if loc_tag else None
+
+            pid = item.select_one("div.profile-id")
+            text_ = " ".join(pid.get_text(" ").split()) if pid else ""
+
+            m = re.search(r"Subject Area\s*:\s*(.*?)\s*(?:P-ISSN|E-ISSN|$)", text_, re.I)
+            subject = (m.group(1).strip() or None) if m else None
+
+            issn = {}
+            for key, pat in ISSN_PATTERNS.items():
+                mm = re.search(pat, text_, re.I)
+                value, status = classify_issn(mm.group(1) if mm else "")
+                issn[f"{key}_issn"], issn[f"{key}_issn_status"] = value, status
+
             results.append({
+                "sinta_journal_id": journal_id,
                 "name": name,
-                "sinta_url": profile_url,
-                "sinta_journal_id": sinta_journal_id,
                 "publisher_name": publisher_name,
-                "sinta_publisher_id": sinta_publisher_id,
+                "sinta_publisher_id": affiliation_id,
                 "subject": subject,
-                "p_issn": p_issn,
-                "e_issn": e_issn,
+                **issn,
                 **parse_listing_extras(item),
             })
         except Exception as e:
@@ -216,7 +222,8 @@ def parse_detail_page(html: str) -> dict:
 
 
 def scrape_listing(max_pages: int | None = None) -> list[dict]:
-    """Scrape semua halaman listing. max_pages=None berarti sampai halaman kosong."""
+    """Scrape semua halaman listing. max_pages=None berarti sampai halaman kosong.
+    Catatan: akan diganti oleh engine.py (belum ada pelacakan halaman gagal)."""
     all_journals = []
     page = 1
 
@@ -246,12 +253,13 @@ def scrape_listing(max_pages: int | None = None) -> list[dict]:
 
 
 def enrich_with_detail(journals: list[dict]) -> list[dict]:
-    """Deep crawl ke tiap halaman profil jurnal untuk data detail."""
+    """Deep crawl ke halaman profil. Akan diganti oleh engine.py.
+    URL dirakit dari SINTA_BASE_URL dan ID (kunci sinta_url sudah tidak ada)."""
     enriched = []
     for i, journal in enumerate(journals, 1):
         try:
             logger.info(f"[{i}/{len(journals)}] Detail: {journal['name']}")
-            html = _safe_get(journal["sinta_url"])
+            html = _safe_get(f"{config.SINTA_BASE_URL}/journals/profile/{journal['sinta_journal_id']}")
             if html is None:
                 logger.warning(f"Skip detail untuk {journal['name']} (gagal fetch)")
                 enriched.append(journal)
