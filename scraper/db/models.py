@@ -33,6 +33,9 @@ class Publisher(Base):
 
     journals = relationship("Journal", back_populates="publisher")
 
+    publisher_size = Column(String, nullable=True)
+    type_confidence = Column(Numeric(6, 3), nullable=True)
+
 
 class Journal(Base):
     __tablename__ = "journals"
@@ -67,6 +70,13 @@ class Journal(Base):
 
     publisher = relationship("Publisher", back_populates="journals")
     rank_histories = relationship("JournalRankHistory", back_populates="journal")
+    
+    predicted_subject_sinta = Column(String, nullable=True)
+    predicted_subject_sinta_multilabel = Column(String, nullable=True)
+    predicted_subject_scopus = Column(String, nullable=True)
+    predicted_subject_scopus_27 = Column(String, nullable=True)
+    scopus_confidence = Column(Numeric(6, 3), nullable=True)
+    predictions_updated_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class JournalRankHistory(Base):
