@@ -78,6 +78,8 @@ class Journal(Base):
     scopus_confidence = Column(Numeric(6, 3), nullable=True)
     predictions_updated_at = Column(DateTime(timezone=True), nullable=True)
 
+    last_detail_scraped_at = Column(DateTime(timezone=True), nullable=True)
+
 
 class JournalRankHistory(Base):
     __tablename__ = "journal_rank_histories"
@@ -89,6 +91,8 @@ class JournalRankHistory(Base):
     scraped_at = Column(DateTime(timezone=True), server_default=func.now())
 
     journal = relationship("Journal", back_populates="rank_histories")
+
+    updated_at = Column(DateTime(timezone=True), nullable=True)
     __table_args__ = (UniqueConstraint("journal_id", "accreditation_year", name="uq_journal_year"),)
 
 
@@ -105,3 +109,38 @@ class ScrapingLog(Base):
     total_flagged = Column(Integer, default=0)
     status = Column(Enum(ScrapingStatus), default=ScrapingStatus.running, nullable=False)
     error_message = Column(Text, nullable=True)
+
+
+class SyncRun(Base):
+    __tablename__ = "sync_runs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    run_type = Column(String, nullable=False)        # listing_sync | detail_refresh
+    trigger = Column(String, nullable=False)         # scheduled | manual
+    status = Column(String, nullable=False, default="queued")  # queued|running|success|failed|paused
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    sinta_total = Column(Integer, nullable=True)
+    db_total_before = Column(Integer, nullable=True)
+    total_processed = Column(Integer, default=0)
+    total_inserted = Column(Integer, default=0)
+    total_updated = Column(Integer, default=0)
+    total_skipped = Column(Integer, default=0)
+    total_flagged = Column(Integer, default=0)
+    pages_failed = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SyncSetting(Base):
+    __tablename__ = "sync_settings"
+
+    id = Column(Integer, primary_key=True, default=1)   # hanya satu baris, id = 1
+    auto_enabled = Column(Boolean, nullable=False, default=False)
+    frequency = Column(String, nullable=False, default="weekly")   # weekly | monthly
+    run_day = Column(Integer, nullable=False, default=6)           # 0 = Senin ... 6 = Minggu
+    run_hour = Column(Integer, nullable=False, default=2)          # jam 0-23 (WIB)
+    detail_refresh_enabled = Column(Boolean, nullable=False, default=True)
+    next_run_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
