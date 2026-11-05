@@ -13,9 +13,10 @@ def _now():
     return datetime.now(timezone.utc)
 
 
-def request_run(db, run_type, trigger):
+def request_run(db, scope, trigger, source=None, requested_by=None, target_id=None):
     """Buat permintaan run. Return None kalau sudah ada run aktif (queued/running)."""
-    run = SyncRun(run_type=run_type, trigger=trigger, status="queued")
+    run = SyncRun(scope=scope, trigger=trigger, source=source,
+                  requested_by=requested_by, target_id=target_id, status="queued")
     db.add(run)
     try:
         db.commit()

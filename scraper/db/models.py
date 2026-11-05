@@ -1,10 +1,11 @@
 from sqlalchemy import (
     Column, BigInteger, String, Boolean, Integer,
-    ForeignKey, DateTime, Enum, Text, Numeric, func, UniqueConstraint
+    ForeignKey, DateTime, Enum, Text, Numeric, Date, Time, func, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 import enum
 from db.session import Base
+from sqlalchemy.dialects.postgresql import ARRAY
 
 
 class JournalStatus(str, enum.Enum):
@@ -80,6 +81,10 @@ class Journal(Base):
 
     last_detail_scraped_at = Column(DateTime(timezone=True), nullable=True)
 
+    e_issn_status = Column(String, nullable=True)   # valid | short | invalid | none
+    p_issn_status = Column(String, nullable=True)
+    sinta_affiliation_id = Column(BigInteger, nullable=True)   # ID dari tautan listing, apa adanya
+
 
 class JournalRankHistory(Base):
     __tablename__ = "journal_rank_histories"
@@ -95,7 +100,6 @@ class JournalRankHistory(Base):
     updated_at = Column(DateTime(timezone=True), nullable=True)
     __table_args__ = (UniqueConstraint("journal_id", "accreditation_year", name="uq_journal_year"),)
 
-
 class ScrapingLog(Base):
     __tablename__ = "scraping_logs"
 
@@ -109,14 +113,16 @@ class ScrapingLog(Base):
     total_flagged = Column(Integer, default=0)
     status = Column(Enum(ScrapingStatus), default=ScrapingStatus.running, nullable=False)
     error_message = Column(Text, nullable=True)
-
-
+    
 class SyncRun(Base):
     __tablename__ = "sync_runs"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    run_type = Column(String, nullable=False)        # listing_sync | detail_refresh
+    scope = Column(String, nullable=False)           # new | update | full
+    source = Column(String, nullable=True)           # listing | profile | null = sesuai cakupan
     trigger = Column(String, nullable=False)         # scheduled | manual
+    requested_by = Column(String, nullable=True)     # admin atau nama jadwal
+    target_id = Column(BigInteger, nullable=True)    # ID jurnal bila hanya satu jurnal
     status = Column(String, nullable=False, default="queued")  # queued|running|success|failed|paused
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
@@ -133,14 +139,35 @@ class SyncRun(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-class SyncSetting(Base):
-    __tablename__ = "sync_settings"
+class SyncSchedule(Base):
+    __tablename__ = "sync_schedules"
 
-    id = Column(Integer, primary_key=True, default=1)   # hanya satu baris, id = 1
-    auto_enabled = Column(Boolean, nullable=False, default=False)
-    frequency = Column(String, nullable=False, default="weekly")   # weekly | monthly
-    run_day = Column(Integer, nullable=False, default=6)           # 0 = Senin ... 6 = Minggu
-    run_hour = Column(Integer, nullable=False, default=2)          # jam 0-23 (WIB)
-    detail_refresh_enabled = Column(Boolean, nullable=False, default=True)
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    scope = Column(String, nullable=False)           # new | update | full
+    frequency = Column(String, nullable=False)       # daily | weekly | monthly | date | cron
+    weekdays = Column(ARRAY(Integer), nullable=True) # 0 = Senin ... 6 = Minggu
+    month_day = Column(Integer, nullable=True)
+    run_date = Column(Date, nullable=True)
+    cron_expr = Column(String, nullable=True)
+    run_time = Column(Time, nullable=False)
+    timezone = Column(String, nullable=False, default="Asia/Jakarta")
+    is_active = Column(Boolean, nullable=False, default=False)
+    after_ml_predict = Column(Boolean, nullable=False, default=False)
+    after_reclassify_publisher = Column(Boolean, nullable=False, default=False)
     next_run_at = Column(DateTime(timezone=True), nullable=True)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SyncChange(Base):
+    __tablename__ = "sync_changes"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    run_id = Column(BigInteger, ForeignKey("sync_runs.id"), nullable=False)
+    journal_id = Column(BigInteger, ForeignKey("journals.id"), nullable=False)
+    field = Column(String, nullable=False)
+    old_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

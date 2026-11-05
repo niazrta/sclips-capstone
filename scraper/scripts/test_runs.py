@@ -9,11 +9,11 @@ from sync import runs
 db = SessionLocal()
 made = []
 try:
-    a = runs.request_run(db, "listing_sync", "manual")
+    a = runs.request_run(db, "new", "manual")
     made.append(a.id)
     print("1. run pertama dibuat, status:", a.status)
 
-    b = runs.request_run(db, "listing_sync", "manual")
+    b = runs.request_run(db, "new", "manual")
     print("2. run kedua saat yang pertama aktif ->", b, "(harus None)")
 
     c = runs.claim_next(db)
@@ -23,7 +23,7 @@ try:
     print("4. progres tersimpan:", db.get(SyncRun, a.id).total_processed)
 
     runs.finish(db, a.id, "success")
-    d = runs.request_run(db, "detail_refresh", "scheduled")
+    d = runs.request_run(db, "update", "scheduled")
     made.append(d.id)
     print("5. setelah selesai, run baru bisa dibuat:", d is not None)
 
