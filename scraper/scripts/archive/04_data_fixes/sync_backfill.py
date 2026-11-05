@@ -49,8 +49,8 @@ srows = snap["rows"] if isinstance(snap, dict) else snap
 info = {}
 for r in srows:
     sid = str(r.get("sinta_publisher_id") or "")
-    info[int(r["sinta_journal_id"])] = (r.get("publisher_name") or None,
-                                        int(sid) if sid.isdigit() else None)
+    pn = " ".join((r.get("publisher_name") or "").split()) or None   # rapikan spasi, huruf tetap
+    info[int(r["sinta_journal_id"])] = (pn, int(sid) if sid.isdigit() else None)
 
 conn = engine.connect()
 tx = conn.begin()
