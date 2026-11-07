@@ -19,7 +19,10 @@ jrows = [{"id": int(r.journal_id), "s1": r.predicted_subject_sinta,
           "s4": r.predicted_subject_scopus_27, "c": float(r.scopus_confidence_score), "ts": now}
          for r in df.itertuples()]
 
-pub = df[df["publisher_id"].notna() & (df["publisher_id"] != UNKNOWN_PUBLISHER)]
+pub = df[df["publisher_id"].notna() & df["predicted_publisher_type"].notna()
+         & (df["publisher_id"] != UNKNOWN_PUBLISHER)]
+skipped = df[df["publisher_id"].notna() & df["predicted_publisher_type"].isna()]
+print("Punya penerbit tapi tanpa tipe dari ML (dilewati):", len(skipped), sorted(skipped["journal_id"])[:10])
 prows = [{"id": int(i), "t": g["predicted_publisher_type"].iloc[0],
           "sz": g["publisher_size"].iloc[0],
           "c": float(g["publisher_classification_confidence"].iloc[0])}
