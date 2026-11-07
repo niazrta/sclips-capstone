@@ -33,6 +33,17 @@ def parse_id_number(s):
     return float(s.replace(".", "").replace(",", "."))
 
 
+_INVISIBLE = dict.fromkeys(map(ord, "\u200b\u200e\u200f\u202a\u202b\u202c\u202d\u202e\ufeff"))
+
+
+def _link(v):
+    """Penanda 'tidak ada' dari SINTA dibaca kosong. Spasi di tepi dibuang, isi tidak diubah."""
+    v = (v or "").translate(_INVISIBLE).strip()
+    if v in ("", "#", "#!", "-") or v.endswith("/img/journal/"):
+        return None
+    return v
+
+
 def parse_listing_extras(item) -> dict:
     """Ekstrak field tambahan dari item listing SINTA."""
     out = {"garuda_id": None}
@@ -43,9 +54,9 @@ def parse_listing_extras(item) -> dict:
         for a in item.select("div.affil-abbrev a[href]")
     }
 
-    out["google_scholar_url"] = links.get("Google Scholar")
-    out["website"] = links.get("Website")
-    out["editor_url"] = links.get("Editor URL")
+    out["google_scholar_url"] = _link(links.get("Google Scholar"))
+    out["website"] = _link(links.get("Website"))
+    out["editor_url"] = _link(links.get("Editor URL"))
 
     # Garuda ID
     for a in item.select("a[href]"):
@@ -65,7 +76,7 @@ def parse_listing_extras(item) -> dict:
 
     # Cover URL
     img = item.select_one("img.journal-cover")
-    out["cover_url"] = img.get("src") if img else None
+    out["cover_url"] = _link(img.get("src")) if img else None
 
     # Metrik jurnal
     raw = {}
