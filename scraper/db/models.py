@@ -25,7 +25,6 @@ class Publisher(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)          # hasil normalisasi
-    raw_name = Column(String, nullable=True)        # nama asli dari SINTA
     sinta_publisher_id = Column(BigInteger, nullable=True)
     type = Column(String, nullable=True)             # diisi ML: HEI/GOV/SOC/COM
     is_active = Column(Boolean, default=True, nullable=False)
@@ -46,8 +45,6 @@ class Journal(Base):
     name = Column(String, nullable=False)
     e_issn = Column(String, nullable=True)
     p_issn = Column(String, nullable=True)
-    sinta_url = Column(String, nullable=True)
-    current_rank = Column(String, nullable=True)     # S1-S6
     subject = Column(String, nullable=True)            # diisi ML setelah klasifikasi
     is_active = Column(Boolean, default=True, nullable=False)
     status = Column(Enum(JournalStatus), default=JournalStatus.unverified, nullable=False)
@@ -113,7 +110,7 @@ class ScrapingLog(Base):
     total_flagged = Column(Integer, default=0)
     status = Column(Enum(ScrapingStatus), default=ScrapingStatus.running, nullable=False)
     error_message = Column(Text, nullable=True)
-    
+
 class SyncRun(Base):
     __tablename__ = "sync_runs"
 
