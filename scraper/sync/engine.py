@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from config import config
 from db.models import Journal, JournalRankHistory, Publisher, SyncChange
-from db.session import SessionLocal
+from db.session import SessionLocal, engine as db_engine
 from scraper.sinta_scraper import (
     LIST_URL_TEMPLATE, REQUEST_TIMEOUT, _safe_get, parse_detail_page,
     parse_listing_page, session,
@@ -178,6 +178,7 @@ def run_update(apply=False, from_dir=None, save_dir=None, limit=None, ids=None, 
         if age > max_age_hours:
             print(f"DIBATALKAN: salinan listing berumur {age:.0f} jam (batas {max_age_hours}).")
             return
+        print("Database:", db_engine.url.database)
     data = read_listing(from_dir, save_dir)
     print(f"Halaman: {data['total_pages']} | Total Records: {data['total_records']} | "
           f"baris terbaca: {len(data['rows'])} | halaman gagal: {data['failed'][:10]}")

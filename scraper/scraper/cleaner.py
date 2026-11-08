@@ -19,3 +19,8 @@ def classify_issn(raw):
     if re.fullmatch(r"[\dXx-]{1,7}", raw) and re.search(r"\d", raw):
         return raw, "short"
     return raw, "invalid"
+
+def publisher_or_none(s):
+    """Nama penerbit penanda kosong ('-') dibaca sebagai tidak ada penerbit."""
+    v = collapse_spaces(s)
+    return None if v in (None, "-") else v

@@ -10,10 +10,11 @@ ap.add_argument("--from-dir", default=None, help="baca listing dari salinan (umu
 ap.add_argument("--save-dir", default=None, help="simpan listing yang dibaca ke folder ini")
 ap.add_argument("--limit", type=int, default=None, help="hanya terapkan N jurnal pertama (uji)")
 ap.add_argument("--ids", default=None, help="hanya terapkan jurnal ber-ID ini, pisah koma (uji)")
+ap.add_argument("--max-age-hours", type=float, default=24, help="umur maksimal salinan listing bila --apply")
 a = ap.parse_args()
 
 if a.apply and a.offline:
     ap.error("--offline hanya boleh dry-run")
 from_dir = a.from_dir or ("data/raw_listing" if a.offline else None)
 ids = {int(x) for x in a.ids.split(",")} if a.ids else None
-engine.run_update(apply=a.apply, from_dir=from_dir, save_dir=a.save_dir, limit=a.limit, ids=ids)
+engine.run_update(apply=a.apply, from_dir=from_dir, save_dir=a.save_dir, limit=a.limit, ids=ids, max_age_hours=a.max_age_hours)

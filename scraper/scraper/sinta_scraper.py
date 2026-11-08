@@ -4,7 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 from config import config
 from utils.logger import get_logger
-from scraper.cleaner import collapse_spaces, classify_issn
+from scraper.cleaner import collapse_spaces, classify_issn, publisher_or_none
 
 logger = get_logger("sinta_scraper")
 
@@ -149,7 +149,7 @@ def parse_listing_page(html: str) -> list[dict]:
                 continue
 
             loc_tag = item.select_one("div.affil-loc > a")
-            publisher_name = collapse_spaces(loc_tag.get_text()) if loc_tag else None
+            publisher_name = publisher_or_none(loc_tag.get_text()) if loc_tag else None
             affiliation_id = _id_from(loc_tag.get("href")) if loc_tag else None
 
             pid = item.select_one("div.profile-id")
