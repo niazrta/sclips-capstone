@@ -10,7 +10,7 @@ import requests
 from sqlalchemy import text
 
 from config import config
-from db.models import Journal, JournalRankHistory, JournalStatus, Publisher, SyncChange
+from db.models import Journal, JournalRankHistory, JournalStatus, Publisher, SyncChange, SyncRun
 from db.session import SessionLocal, engine as db_engine
 from scraper.sinta_scraper import (
     LIST_URL_TEMPLATE, REQUEST_TIMEOUT, _safe_get, parse_detail_page,
@@ -230,10 +230,14 @@ def _fresh(from_dir, max_age_hours):
 # ---------- satu program untuk tiga cakupan ----------
 
 def run(scope, apply=False, from_dir=None, save_dir=None, limit=None, ids=None,
-        max_age_hours=24, force_read=False):
+        max_age_hours=24, force_read=False, run_id=None):
     if scope not in ("new", "update", "full"):
         raise ValueError(f"cakupan tidak dikenal: {scope}")
     if apply and from_dir and not _fresh(from_dir, max_age_hours):
+        if run_id is not None:
+            d = SessionLocal()
+            runs.finish(d, run_id, "failed", error="salinan listing terlalu tua")
+            d.close()
         return
     print("Database:", db_engine.url.database)
     do_update = scope in ("update", "full")
@@ -248,7 +252,9 @@ def run(scope, apply=False, from_dir=None, save_dir=None, limit=None, ids=None,
         print(f"\nSTATUS: {status}" + (f" ({note})" if note else ""))
 
     try:
-        if apply:
+        if run_id is not None:
+            run_row = db.get(SyncRun, run_id)      # baris queued yang sudah diklaim worker
+        elif apply:
             run_row = runs.request_run(db, scope, "manual", requested_by="cli")
             if run_row is None:
                 print("Sudah ada run aktif, dibatalkan.")
