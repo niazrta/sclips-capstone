@@ -5,7 +5,8 @@ from db.session import engine
 from scraper.sinta_scraper import parse_listing_page
 
 parsed = {}
-for path in glob.glob("data/raw_listing/page_*.html.gz"):
+DIR = sys.argv[1] if len(sys.argv) > 1 else "data/raw_listing"
+for path in glob.glob(os.path.join(DIR, "page_*.html.gz")):
     for r in parse_listing_page(gzip.open(path, "rt", encoding="utf-8").read()):
         parsed[r["sinta_journal_id"]] = r
 
