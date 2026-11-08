@@ -1,6 +1,6 @@
 # Sinkronisasi Data SINTA: Definisi dan Prosedur
 
-Status: rancangan untuk disetujui. Kode sinkronisasi belum berjalan.
+Status: diimplementasikan. Diuji pada salinan database dan pada database utama (Nov 2026).
 
 ## 1. Tujuan
 Basis data S-CLIPS harus akurat terhadap SINTA. Acuan kebenaran adalah situs SINTA. Sinkronisasi membandingkan data kita dengan SINTA, memperbaiki perbedaannya, dan mencatat setiap perubahan.
@@ -8,75 +8,64 @@ Basis data S-CLIPS harus akurat terhadap SINTA. Acuan kebenaran adalah situs SIN
 ## 2. Sumber data
 Alamat dirakit dari `SINTA_BASE_URL`, tidak tertanam di kode.
 
-| Sumber | Halaman | Waktu | Isi |
+| Sumber | Halaman | Waktu (terukur) | Isi |
 | --- | --- | --- | --- |
-| `listing` | daftar jurnal, 1.677 halaman | sekitar 70 menit (terukur pada audit) | nama, ISSN, penerbit dan tautan afiliasi, subject, badge peringkat, tautan, indeksasi, metrik |
-| `profile` | satu jurnal | sekitar 2 detik per jurnal; semua jurnal sekitar 12 jam (hitungan, belum terukur) | riwayat akreditasi per tahun |
+| listing | daftar jurnal, 1.677 halaman | sekitar 65 menit | nama, ISSN, penerbit dan tautan afiliasi, subject, badge, tautan, indeksasi, metrik |
+| profil | satu jurnal | sekitar 2 detik per jurnal | riwayat akreditasi per tahun (satu-satunya sumber) |
 
-## 3. Cakupan
+Jeda antar permintaan 2 detik. robots.txt SINTA tidak melarang akses (`Disallow` kosong, diperiksa 8 November 2026).
+
+## 3. Tiga cakupan
+Satu program (`python -m sync --scope ...`), dipanggil dengan cakupan berbeda. Beda cakupan hanya pada apa yang boleh ditulis.
+
 | Cakupan | Dilakukan | Tidak dilakukan |
 | --- | --- | --- |
-| `new` | Bandingkan daftar ID. Masukkan jurnal yang belum ada, ambil profilnya, antre prediksi ML. | Tidak mengubah jurnal yang ada. Tidak menandai yang hilang. |
-| `update` | Bandingkan field jurnal yang sudah ada dengan listing, lalu perbarui yang berbeda. Profil diambil untuk jurnal yang belum pernah diambil atau badge-nya berubah (opsional: `--profile-batch N` untuk yang paling lama). | Tidak memasukkan jurnal baru. Tidak menandai yang hilang. |
-| `full` | `new` + `update` + profil semua jurnal + penandaan jurnal yang hilang. | Tidak menghapus apa pun. |
+| `new` | Bandingkan Total Records halaman 1 dengan jumlah jurnal aktif. Bila beda, baca listing penuh, masukkan jurnal baru (profil diambil), tandai yang hilang. | Tidak mengubah field jurnal yang ada. |
+| `update` | Bandingkan field jurnal yang sudah ada dengan listing, perbarui yang berbeda. Bila badge berubah, ambil profil untuk riwayat. | Tidak memasukkan jurnal baru, tidak menandai hilang. |
+| `full` | `new` dan `update` dari satu pembacaan listing. Jurnal `unverified` yang masih absen menjadi `inactive`. | Tidak menghapus apa pun. |
 
-Disarankan: `new` mingguan, `update` bulanan, `full` satu sampai tiga bulan sekali.
+Setiap run tercatat sebagai satu baris `sync_runs` dengan cakupannya.
 
-## 5. Prosedur (sama untuk semua cakupan)
-1. Kumpulkan data dari sumber.
-2. Periksa kelengkapan: semua halaman terambil (yang gagal diulang), jumlah baris sama dengan Total Records di header, ID unik.
-3. Bandingkan dengan database berdasarkan ID SINTA.
-4. Tentukan tindakan sesuai cakupan dan aturan bagian 4.
-5. Terapkan, satu transaksi per jurnal, dan tulis `sync_changes`.
-6. Laporkan di `sync_runs`.
+## 4. Prosedur
+1. Baca sumber. 2. Periksa kelengkapan: tidak ada halaman gagal, jumlah baris sama dengan Total Records, ID unik. Bila tidak lengkap, run `paused` dan tidak ada yang ditulis. 3. Bandingkan berdasarkan ID SINTA. 4. Tentukan tindakan sesuai cakupan. 5. Tulis, satu transaksi per jurnal, dan catat di `sync_changes`. 6. Tutup run dengan hasilnya.
 
-Kalau listing tidak lengkap, penandaan jurnal hilang tidak dijalankan.
-
-## 4. Aturan perbedaan
-| Data | Bila berbeda dari SINTA |
+## 5. Aturan perbedaan data
+| Data | Aturan |
 | --- | --- |
-| Nama, penerbit, subject | SINTA menang. Nilai lama dan baru dicatat. |
-| ISSN | `*_raw` selalu sama dengan SINTA. `e_issn`/`p_issn` diisi hanya bila valid. |
-| Metrik dan tautan | Ditimpa, `metrics_updated_at` diisi. |
-| `rank_badge` | Ditimpa (peringkat resmi, `NA` = tidak terakreditasi). |
-| Riwayat akreditasi | Tahun baru ditambah, tahun berbeda diperbarui, tidak ada yang dihapus. Baris yang tidak ada di SINTA tidak dibuat. Selisih badge dan riwayat terakhir dicatat. |
-| Kosong di SINTA | Dikosongkan bila teks sumber memang kosong atau penanda (`0`, `-`). Bila teks ada tapi gagal diparse, nilai lama dipertahankan dan diberi peringatan. |
-| Jurnal baru | Masuk sebagai `active`, antre prediksi ML. |
-| Jurnal hilang | `unverified` dan nonaktif. Menjadi `inactive` setelah dua sinkron `full` berturut-turut. Hanya pada `full` yang lengkap. |
+| Nama, subject, penerbit | Ikuti SINTA persis. Spasi ganda dirapikan jadi satu, huruf tidak diubah. Penerbit bernama `-` = tanpa penerbit. |
+| ISSN | Disimpan apa adanya (awalan `P`/`E`, `x` kecil, kurang dari 8 karakter). Pemisah antar-kelompok menjadi `-`. Kolom status: `valid`, `short`, `invalid`, `none`. Tidak ada digit yang ditambah. |
+| Tautan | Penanda kosong SINTA (`#!`, `-`, cover folder kosong) disimpan NULL. Spasi di tepi dibuang. |
+| Badge | Disimpan apa adanya di `rank_badge`. NA = tidak terakreditasi. |
+| Metrik | Ditimpa; `metrics_updated_at` diisi. |
+| Riwayat akreditasi | Tahun baru ditambah, tahun berbeda diperbarui, tidak ada yang dihapus atau dibuat sendiri. |
+| Kosong di SINTA | Dikosongkan dan dicatat. |
+| Kolom prediksi ML, tipe dan ukuran penerbit | Tidak pernah disentuh sinkronisasi. |
+| Jurnal baru | Masuk `active`; penerbit baru dibuat tanpa tipe. |
 
-## 6. Data yang disimpan
-- Identitas: `id` (ID SINTA), nama, `e_issn`/`p_issn` dan `*_raw`, subject.
-- Penerbit: nama persis dari SINTA, `sinta_affiliation_id` (ID dari tautan, apa adanya).
-- Peringkat: `rank_badge`, riwayat akreditasi per tahun.
-- Tautan: website, editor, Google Scholar, `garuda_id` (URL Garuda dirakit dari ID).
-- Indeksasi dan metrik: `scopus_indexed`, `garuda_indexed`, impact, h5-index, citations 5yr, citations.
-- Waktu: `last_seen_at`, `metrics_updated_at`, `last_detail_scraped_at`.
+## 6. Jurnal hilang
+1. Hanya diproses bila listing lengkap.
+2. Lebih dari 100 kandidat (aktif di database, absen di listing): run `paused`, tidak diperiksa.
+3. Selain itu, sebuah jurnal kontrol dibuka dulu; bila tidak terbuka normal, tidak ada alihan yang dipercaya. Lalu profil tiap kandidat dibuka tanpa mengikuti alihan: dialihkan berarti terkonfirmasi, terbuka normal berarti tidak ditandai.
+4. Terkonfirmasi 1 sampai 20: status `unverified` dan nonaktif. Lebih dari 20: tidak ada yang ditandai, run `paused`, daftar tercatat di `sync_changes` (`kandidat_hilang`).
+5. Pada `full`, `unverified` yang masih absen dan masih dialihkan menjadi `inactive`.
+6. Jurnal `unverified` yang muncul lagi di listing diaktifkan kembali.
 
-Tidak disentuh sinkronisasi: kolom `predicted_*`, `publishers.type`, `publisher_size`, `type_confidence`, `journal_id_map`.
+Batas 20 dan 100 adalah parameter, bukan klaim literatur: total SINTA hanya turun 4 jurnal dalam sebulan.
 
-## 7. Pencatatan
-- `sync_runs`: cakupan, pemicu (`scheduled` atau `manual`), `requested_by`, target ID, hasil, dan detak.
-- `sync_changes`: run, jurnal, kolom, nilai lama, nilai baru.
-- Sinkron manual memilih cakupan dan tercatat di `sync_runs`.
+## 7. Pencatatan dan penjadwalan
+- `sync_runs`: cakupan, pemicu (`scheduled`/`manual`), status, detak, hitungan, pesan.
+- `sync_changes`: run, jurnal, field, nilai lama, nilai baru.
+- `sync_schedules`: jadwal harian, mingguan, bulanan, atau tanggal tertentu, dengan zona waktu. Dua jadwal awal (nonaktif): `new` harian 02:00 dan `full` Sabtu 02:00 WIB. Jam bisa diubah admin.
+- Worker (`python -m sync.worker`) tiap 30 detik: memulihkan run macet (detak berhenti lebih dari 10 menit), membuat run dari jadwal jatuh tempo, mengambil run `queued` (tombol manual).
+- Hanya satu run aktif sekaligus (indeks unik di database).
+- Sepuluh halaman gagal beruntun menghentikan run.
 
-## 8. Pemanggilan (satu program)
-```
-python -m sync --scope new
-python -m sync --scope update --source listing
-python -m sync --scope update --source profile --id 671
-python -m sync --scope full
-```
-Worker memanggil fungsi yang sama dengan parameter dari jadwal.
+## 8. Yang teruji dan belum
+Teruji: `new` (jurnal baru, muncul lagi, 25 dan 120 kandidat, listing bolong), `update` (termasuk jalur profil), `full` (database utama, 0 perubahan terhadap SINTA 8 November), worker (antrean manual, jadwal harian), jadwal mingguan (perhitungan).
+Belum teruji: profil yang masih terbuka padahal tidak ada di listing, gagal unduh dari jaringan, respons 429 sungguhan, jadwal bulanan dan tanggal, worker berjalan berjam-jam, eskalasi lebih dari 20 jurnal.
 
-## 9. Pengaman
-- Hanya satu run aktif pada satu waktu (indeks unik di database).
-- Tidak ada penghapusan data.
-- Penandaan hilang dibatalkan bila lebih dari 1% jurnal aktif hilang sekaligus (batas usulan, belum diuji).
-- Berhenti setelah 10 kegagalan beruntun, lanjut dari progres tersimpan.
-- Jeda 2 detik antar permintaan, jadwal di jam sepi.
-- Run dengan detak berhenti lebih dari 10 menit ditandai gagal.
-
-## 10. Hal terbuka
-- Pemicu prediksi ML setelah sinkronisasi (dibahas dengan ML).
-- Batas 1% dan ukuran batch profil adalah usulan.
-- Hierarki fakultas ke universitas belum dipetakan.
+## 9. Hal terbuka
+- Pemicu prediksi ML setelah sinkronisasi (menunggu ML dan FS).
+- Aksi admin untuk jurnal yang dicurigai hilang.
+- Jadwal cron, hierarki fakultas ke universitas, ISSN yang kurang dari 8 karakter (diduga lengkap di Garuda).
+- Ambang 20 dan 100, jam 02:00, dan frekuensi menunggu konfirmasi dosen.
