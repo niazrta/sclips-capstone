@@ -183,7 +183,7 @@ def _publisher_id(db, pmap, name):
         return None
     pid = pmap.get(name)
     if pid is None:
-        p = Publisher(name=name, raw_name=name, is_active=True)
+        p = Publisher(name=name, is_active=True)
         db.add(p)
         db.flush()
         pid = pmap[name] = p.id

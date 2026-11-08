@@ -11,7 +11,7 @@ logger = get_logger("export")
 EXPORT_QUERY = """
     SELECT j.id AS journal_id,
            j.name AS journal_title,
-           p.raw_name AS publisher_name_raw,
+           p.name AS publisher_name_raw,
            p.name AS publisher_name_clean,
            j.subject,
            p.type AS publisher_type,
