@@ -28,6 +28,11 @@ FIELDS = ["name", "subject", "e_issn", "e_issn_status", "p_issn", "p_issn_status
 METRICS = {"impact", "h5_index", "citations_5yr", "citations"}
 TOTALS = re.compile(r"Page\s+[\d.,]+\s+of\s+([\d.,]+)\s*\|\s*Total Records\s+([\d.,]+)", re.I)
 
+MAX_CEK_KANDIDAT = 100   # lebih dari ini: run dijeda, profil tidak dicek
+MAX_TANDAI = 20          # lebih dari ini terkonfirmasi hilang: tidak ada yang ditandai
+
+
+# ---------- membaca SINTA ----------
 
 def _num(s):
     return int(re.sub(r"[.,]", "", s))
@@ -39,8 +44,8 @@ def _norm(v):
     return v
 
 
-def read_listing(from_dir=None, save_dir=None):
-    """Baca listing dari SINTA, atau dari salinan di from_dir."""
+def read_listing(from_dir=None, save_dir=None, on_progress=None):
+    """Baca seluruh listing dari SINTA, atau dari salinan di from_dir."""
     pages = {}
     if from_dir:
         for path in glob.glob(os.path.join(from_dir, "page_*.html.gz")):
@@ -66,6 +71,8 @@ def read_listing(from_dir=None, save_dir=None):
                 failed.append(p)
             else:
                 pages[p] = html
+            if p % 50 == 0 and on_progress:
+                on_progress()
             if p % 200 == 0:
                 logger.info(f"Listing {p}/{total_pages}, gagal {len(failed)}")
         for p in list(failed):
@@ -106,6 +113,34 @@ def fetch_profile(jid):
     return None, "error"
 
 
+def _check_candidates(cands, control_id):
+    """Buka profil tiap kandidat tanpa mengikuti alihan. Hanya membaca.
+    Jurnal kontrol (ada di listing) harus terbuka normal dulu, kalau tidak alihan tidak dipercaya."""
+    html, state = fetch_profile(control_id)
+    time.sleep(config.SCRAPE_DELAY_SECONDS)
+    if state != "ok":
+        print(f"Kontrol gagal: profil {control_id} berstatus '{state}'. Tidak ada kandidat yang dipercaya.")
+        return [], [], list(cands)
+    print(f"Kontrol lolos: profil {control_id} terbuka normal.")
+    confirmed, still_open, unknown = [], [], []
+    for jid in cands:
+        html, state = fetch_profile(jid)
+        time.sleep(config.SCRAPE_DELAY_SECONDS)
+        if state == "redirect":
+            confirmed.append(jid)
+        elif state == "ok":
+            try:
+                parse_detail_page(html)
+                still_open.append(jid)
+            except Exception:
+                unknown.append(jid)
+        else:
+            unknown.append(jid)
+    return confirmed, still_open, unknown
+
+
+# ---------- membandingkan dan menulis ----------
+
 def plan_update(db, rows):
     """Bandingkan listing dengan database. Hanya membaca."""
     jmap = {j.id: j for j in db.query(Journal).all()}
@@ -137,19 +172,23 @@ def _write_change(db, run_id, jid, field, old, new):
                       new_value=None if new is None else str(new)))
 
 
+def _publisher_id(db, pmap, name):
+    """ID penerbit untuk nama SINTA persis. Dibuat tanpa tipe bila belum ada."""
+    if name is None:
+        return None
+    pid = pmap.get(name)
+    if pid is None:
+        p = Publisher(name=name, raw_name=name, is_active=True)
+        db.add(p)
+        db.flush()
+        pid = pmap[name] = p.id
+    return pid
+
+
 def apply_journal(db, run_id, j, changes, pmap, now):
     for f, old, new in changes:
         if f == "publisher":
-            if new is None:
-                j.publisher_id = None
-            else:
-                pid = pmap.get(new)
-                if pid is None:
-                    p = Publisher(name=new, raw_name=new, is_active=True)  # tanpa tipe
-                    db.add(p)
-                    db.flush()
-                    pid = pmap[new] = p.id
-                j.publisher_id = pid
+            j.publisher_id = _publisher_id(db, pmap, new)
         else:
             setattr(j, f, Decimal(str(new)) if (f == "impact" and new is not None) else new)
         _write_change(db, run_id, j.id, f, old, new)
@@ -172,117 +211,6 @@ def apply_history(db, run_id, jid, history, now):
             row.sinta_rank, row.updated_at = h["rank"], now
 
 
-def run_update(apply=False, from_dir=None, save_dir=None, limit=None, ids=None, max_age_hours=24):
-    if apply and from_dir:
-        age = (time.time() - os.path.getmtime(os.path.join(from_dir, "page_1.html.gz"))) / 3600
-        if age > max_age_hours:
-            print(f"DIBATALKAN: salinan listing berumur {age:.0f} jam (batas {max_age_hours}).")
-            return
-        print("Database:", db_engine.url.database)
-    data = read_listing(from_dir, save_dir)
-    print(f"Halaman: {data['total_pages']} | Total Records: {data['total_records']} | "
-          f"baris terbaca: {len(data['rows'])} | halaman gagal: {data['failed'][:10]}")
-    print("Listing lengkap:", data["complete"])
-    if not data["complete"]:
-        print("DIBATALKAN: listing tidak lengkap, tidak ada yang ditulis.")
-        return
-
-    db = SessionLocal()
-    run = None
-    try:
-        plan, seen, not_in_db = plan_update(db, data["rows"])
-        if limit:
-            plan = plan[:limit]
-        if ids:
-            plan = [(j, r, ch) for j, r, ch in plan if j.id in ids]
-        by_field = {}
-        for _, _, ch in plan:
-            for f, _, _ in ch:
-                by_field[f] = by_field.get(f, 0) + 1
-        badge_ids = [j.id for j, _, ch in plan if any(f == "rank_badge" for f, _, _ in ch)]
-        blanked = [j.id for j, _, ch in plan if any(f == "subject" and n is None for f, _, n in ch)]
-
-        print(f"\nJurnal terbaca dan sudah ada di database : {len(seen)}")
-        print(f"Jurnal di listing tapi belum ada (diabaikan): {not_in_db}")
-        print(f"Jurnal yang berubah                      : {len(plan)}")
-        print("Perubahan per field                      :", by_field)
-        print(f"Subject dikosongkan                      : {len(blanked)} {blanked[:10]}")
-        print(f"Profil akan dibuka (badge berubah)       : {len(badge_ids)} {badge_ids[:10]}")
-        for j, _, ch in plan[:15]:
-            print(" ", j.id, [(f, o, n) for f, o, n in ch][:4])
-
-        if not apply:
-            print("\nDRY-RUN: tidak ada yang diubah.")
-            return
-
-        run = runs.request_run(db, "update", "manual", requested_by="cli")
-        if run is None:
-            print("Sudah ada run aktif, dibatalkan.")
-            return
-        runs.claim_next(db)
-        now = datetime.now(timezone.utc)
-        pmap = {p.name: p.id for p in db.query(Publisher).all()}
-        profile_fail = 0
-
-        for n, (j, r, ch) in enumerate(plan, 1):
-            apply_journal(db, run.id, j, ch, pmap, now)
-            if j.id in badge_ids:
-                html, state = fetch_profile(j.id)
-                time.sleep(config.SCRAPE_DELAY_SECONDS)
-                try:
-                    if html is None:
-                        raise ValueError(f"profil {state}")
-                    apply_history(db, run.id, j.id, parse_detail_page(html)["accreditation_history"], now)
-                    j.last_detail_scraped_at = now
-                except Exception as e:
-                    profile_fail += 1
-                    logger.warning(f"{j.id}: profil dilewati ({e})")
-            db.commit()
-            if n % 50 == 0:
-                runs.heartbeat(db, run.id, total_processed=n)
-
-        db.execute(text("UPDATE journals SET last_seen_at = :ts WHERE id = ANY(:ids)"),
-                   {"ts": now, "ids": list(seen)})
-        db.commit()
-        runs.heartbeat(db, run.id, sinta_total=data["total_records"], total_processed=len(seen),
-                       total_updated=len(plan), total_skipped=len(seen) - len(plan))
-        runs.finish(db, run.id, "success",
-                    error=f"{profile_fail} profil dilewati" if profile_fail else None)
-        print("\nTERSIMPAN. Profil dilewati:", profile_fail)
-    except Exception as e:
-        db.rollback()
-        if run is not None:
-            runs.finish(db, run.id, "failed", error=str(e)[:500])
-        raise
-    finally:
-        db.close()
-
-
-MAX_CEK_KANDIDAT = 100   # lebih dari ini: run dijeda, profil tidak dicek
-MAX_TANDAI = 20          # lebih dari ini terkonfirmasi hilang: tidak ada yang ditandai
-
-
-def _copy_fresh(from_dir, max_age_hours):
-    age = (time.time() - os.path.getmtime(os.path.join(from_dir, "page_1.html.gz"))) / 3600
-    if age > max_age_hours:
-        print(f"DIBATALKAN: salinan listing berumur {age:.0f} jam (batas {max_age_hours}).")
-        return False
-    return True
-
-
-def _publisher_id(db, pmap, name):
-    """ID penerbit untuk nama SINTA persis. Dibuat tanpa tipe bila belum ada."""
-    if name is None:
-        return None
-    pid = pmap.get(name)
-    if pid is None:
-        p = Publisher(name=name, raw_name=name, is_active=True)
-        db.add(p)
-        db.flush()
-        pid = pmap[name] = p.id
-    return pid
-
-
 def _new_journal(r, publisher_id, now):
     vals = {f: (r.get("sinta_publisher_id") if f == "sinta_affiliation_id" else r.get(f)) for f in FIELDS}
     if vals["impact"] is not None:
@@ -291,55 +219,46 @@ def _new_journal(r, publisher_id, now):
                    status=JournalStatus.active, last_seen_at=now, metrics_updated_at=now, **vals)
 
 
-def _check_candidates(cands, control_id):
-    """Buka profil tiap kandidat tanpa mengikuti alihan. Hanya membaca.
-    Jurnal kontrol (ada di listing) harus terbuka normal dulu, kalau tidak alihan tidak dipercaya."""
-    html, state = fetch_profile(control_id)
-    time.sleep(config.SCRAPE_DELAY_SECONDS)
-    if state != "ok":
-        print(f"Kontrol gagal: profil {control_id} berstatus '{state}'. Tidak ada kandidat yang dipercaya.")
-        return [], [], list(cands)
-    print(f"Kontrol lolos: profil {control_id} terbuka normal.")
-    confirmed, still_open, unknown = [], [], []
-    for jid in cands:
-        html, state = fetch_profile(jid)
-        time.sleep(config.SCRAPE_DELAY_SECONDS)
-        if state == "redirect":
-            confirmed.append(jid)
-        elif state == "ok":
-            try:
-                parse_detail_page(html)
-                still_open.append(jid)
-            except Exception:
-                unknown.append(jid)
-        else:
-            unknown.append(jid)
-    return confirmed, still_open, unknown
+def _fresh(from_dir, max_age_hours):
+    age = (time.time() - os.path.getmtime(os.path.join(from_dir, "page_1.html.gz"))) / 3600
+    if age > max_age_hours:
+        print(f"DIBATALKAN: salinan listing berumur {age:.0f} jam (batas {max_age_hours}).")
+        return False
+    return True
 
 
-def run_new(apply=False, from_dir=None, save_dir=None, max_age_hours=24, force_read=False):
-    if apply and from_dir and not _copy_fresh(from_dir, max_age_hours):
+# ---------- satu program untuk tiga cakupan ----------
+
+def run(scope, apply=False, from_dir=None, save_dir=None, limit=None, ids=None,
+        max_age_hours=24, force_read=False):
+    if scope not in ("new", "update", "full"):
+        raise ValueError(f"cakupan tidak dikenal: {scope}")
+    if apply and from_dir and not _fresh(from_dir, max_age_hours):
         return
     print("Database:", db_engine.url.database)
+    do_update = scope in ("update", "full")
+    do_new = scope in ("new", "full")
     db = SessionLocal()
-    run = None
+    run_row = None
 
     def finish(status, note=None, **counters):
-        if run is not None:
-            runs.heartbeat(db, run.id, **counters)
-            runs.finish(db, run.id, status, error=note)
+        if run_row is not None:
+            runs.heartbeat(db, run_row.id, **counters)
+            runs.finish(db, run_row.id, status, error=note)
         print(f"\nSTATUS: {status}" + (f" ({note})" if note else ""))
 
     try:
         if apply:
-            run = runs.request_run(db, "new", "manual", requested_by="cli")
-            if run is None:
+            run_row = runs.request_run(db, scope, "manual", requested_by="cli")
+            if run_row is None:
                 print("Sudah ada run aktif, dibatalkan.")
                 return
             runs.claim_next(db)
 
         active_total = db.query(Journal).filter(Journal.is_active.is_(True)).count()
-        if not from_dir and not force_read:
+
+        # pra-pengecekan murah: hanya cakupan 'new'
+        if scope == "new" and not from_dir and not force_read:
             m = TOTALS.search(_safe_get(LIST_URL_TEMPLATE.format(page=1)) or "")
             if not m:
                 raise RuntimeError("Halaman 1 tidak terbaca atau Total Records tidak ditemukan")
@@ -350,7 +269,8 @@ def run_new(apply=False, from_dir=None, save_dir=None, max_age_hours=24, force_r
                        sinta_total=sinta_total, db_total_before=active_total)
                 return
 
-        data = read_listing(from_dir, save_dir)
+        beat = (lambda: runs.heartbeat(db, run_row.id)) if run_row else None
+        data = read_listing(from_dir, save_dir, on_progress=beat)
         print(f"Halaman: {data['total_pages']} | Total Records: {data['total_records']} | "
               f"baris terbaca: {len(data['rows'])} | halaman gagal: {data['failed'][:10]}")
         print("Listing lengkap:", data["complete"])
@@ -361,50 +281,110 @@ def run_new(apply=False, from_dir=None, save_dir=None, max_age_hours=24, force_r
 
         rows = {r["sinta_journal_id"]: r for r in data["rows"]}
         known = {j.id: j for j in db.query(Journal).all()}
-        new_ids = sorted(set(rows) - set(known))
-        back = sorted(i for i in rows if i in known and not known[i].is_active)
-        cands = sorted(i for i, j in known.items() if j.is_active and i not in rows)
-        print(f"\nJurnal baru di SINTA          : {len(new_ids)} {new_ids[:10]}")
-        print(f"Muncul lagi di listing        : {len(back)} {[(i, known[i].status.value) for i in back[:10]]}")
-        print(f"Kandidat hilang dari listing  : {len(cands)} {cands[:10]}")
+        seen_ids = [i for i in rows if i in known]
 
-        confirmed, still_open, unknown, hold = [], [], [], None
-        if len(cands) > MAX_CEK_KANDIDAT:
-            hold = (f"{len(cands)} kandidat hilang (lebih dari {MAX_CEK_KANDIDAT}), "
-                    "tidak diperiksa dan tidak ada yang ditandai")
-        elif cands:
-            confirmed, still_open, unknown = _check_candidates(cands, next(iter(rows)))
-            print(f"  profil dialihkan (terkonfirmasi hilang): {len(confirmed)} {confirmed[:10]}")
-            print(f"  profil masih terbuka (tidak ditandai)  : {len(still_open)} {still_open[:10]}")
-            print(f"  tidak dapat dipastikan (tidak ditandai): {len(unknown)} {unknown[:10]}")
-            if len(confirmed) > MAX_TANDAI:
-                hold = (f"{len(confirmed)} terkonfirmasi hilang (lebih dari {MAX_TANDAI}), "
-                        "tidak ada yang ditandai")
-        if hold:
-            print("\nDIJEDA:", hold)
+        # --- rencana pembaruan ---
+        plan, badge_ids = [], set()
+        if do_update:
+            plan, _, not_in_db = plan_update(db, data["rows"])
+            if ids:
+                plan = [p for p in plan if p[0].id in ids]
+            if limit:
+                plan = plan[:limit]
+            by_field = {}
+            for _, _, ch in plan:
+                for f, _, _ in ch:
+                    by_field[f] = by_field.get(f, 0) + 1
+            badge_ids = {j.id for j, _, ch in plan if any(f == "rank_badge" for f, _, _ in ch)}
+            blanked = [j.id for j, _, ch in plan if any(f == "subject" and n is None for f, _, n in ch)]
+            print(f"\nJurnal terbaca dan sudah ada di database : {len(seen_ids)}")
+            if scope == "update":
+                print(f"Jurnal di listing tapi belum ada (diabaikan): {not_in_db}")
+            print(f"Jurnal yang berubah                      : {len(plan)}")
+            print("Perubahan per field                      :", by_field)
+            print(f"Subject dikosongkan                      : {len(blanked)} {blanked[:10]}")
+            print(f"Profil akan dibuka (badge berubah)       : {len(badge_ids)} {sorted(badge_ids)[:10]}")
+            for j, _, ch in plan[:40]:
+                print(" ", j.id, [(f, o, n) for f, o, n in ch][:6])
+
+        # --- rencana jurnal baru, muncul lagi, hilang ---
+        new_ids, back, cands, esc_c = [], [], [], []
+        confirmed, esc_conf, unknown, hold = [], [], [], None
+        if do_new:
+            new_ids = sorted(set(rows) - set(known))
+            back = sorted(i for i in rows if i in known and not known[i].is_active)
+            cands = sorted(i for i, j in known.items() if j.is_active and i not in rows)
+            if scope == "full":
+                esc_c = sorted(i for i, j in known.items()
+                               if j.status == JournalStatus.unverified and i not in rows)
+            print(f"\nJurnal baru di SINTA          : {len(new_ids)} {new_ids[:10]}")
+            print(f"Muncul lagi di listing        : {len(back)} {[(i, known[i].status.value) for i in back[:10]]}")
+            print(f"Kandidat hilang dari listing  : {len(cands)} {cands[:10]}")
+            if scope == "full":
+                print(f"Unverified masih absen        : {len(esc_c)} {esc_c[:10]}")
+
+            check = []
+            if len(cands) > MAX_CEK_KANDIDAT:
+                hold = (f"{len(cands)} kandidat hilang (lebih dari {MAX_CEK_KANDIDAT}), "
+                        "tidak diperiksa dan tidak ada yang ditandai")
+            else:
+                check = cands + (esc_c if len(esc_c) <= MAX_CEK_KANDIDAT else [])
+            if check:
+                conf_all, open_all, unknown = _check_candidates(check, next(iter(rows)))
+                cs, es = set(cands), set(esc_c)
+                confirmed = [i for i in conf_all if i in cs]
+                esc_conf = [i for i in conf_all if i in es]
+                print(f"  profil dialihkan (terkonfirmasi hilang): {len(confirmed)} {confirmed[:10]}")
+                print(f"  profil masih terbuka (tidak ditandai)  : {len([i for i in open_all if i in cs])}")
+                print(f"  tidak dapat dipastikan (tidak ditandai): {len(unknown)} {unknown[:10]}")
+                if scope == "full":
+                    print(f"  unverified masih dialihkan (jadi inactive): {len(esc_conf)} {esc_conf[:10]}")
+                if len(confirmed) > MAX_TANDAI:
+                    hold = (f"{len(confirmed)} terkonfirmasi hilang (lebih dari {MAX_TANDAI}), "
+                            "tidak ada yang ditandai")
+            if hold:
+                print("\nDIJEDA:", hold)
 
         if not apply:
             print("\nDRY-RUN: tidak ada yang diubah.")
             return
 
+        # --- menulis ---
         now = datetime.now(timezone.utc)
         seen_at = (datetime.fromtimestamp(os.path.getmtime(os.path.join(from_dir, "page_1.html.gz")),
                                           timezone.utc) if from_dir else now)
         pmap = {p.name: p.id for p in db.query(Publisher).all()}
         inserted = profile_fail = row_fail = 0
 
-        for jid in new_ids:
+        for n, (j, r, ch) in enumerate(plan, 1):
+            apply_journal(db, run_row.id, j, ch, pmap, now)
+            if j.id in badge_ids:
+                html, state = fetch_profile(j.id)
+                time.sleep(config.SCRAPE_DELAY_SECONDS)
+                try:
+                    if html is None:
+                        raise ValueError(f"profil {state}")
+                    apply_history(db, run_row.id, j.id, parse_detail_page(html)["accreditation_history"], now)
+                    j.last_detail_scraped_at = now
+                except Exception as e:
+                    profile_fail += 1
+                    logger.warning(f"{j.id}: profil dilewati ({e})")
+            db.commit()
+            if n % 50 == 0:
+                runs.heartbeat(db, run_row.id, total_processed=n)
+
+        for n, jid in enumerate(new_ids, 1):
             try:
                 r = rows[jid]
                 db.add(_new_journal(r, _publisher_id(db, pmap, r.get("publisher_name")), seen_at))
                 db.flush()
-                _write_change(db, run.id, jid, "journal_baru", None, r["name"])
+                _write_change(db, run_row.id, jid, "journal_baru", None, r["name"])
                 html, state = fetch_profile(jid)
                 time.sleep(config.SCRAPE_DELAY_SECONDS)
                 try:
                     if html is None:
                         raise ValueError(f"profil {state}")
-                    apply_history(db, run.id, jid, parse_detail_page(html)["accreditation_history"], now)
+                    apply_history(db, run_row.id, jid, parse_detail_page(html)["accreditation_history"], now)
                     db.get(Journal, jid).last_detail_scraped_at = now
                 except Exception as e:
                     profile_fail += 1
@@ -416,46 +396,69 @@ def run_new(apply=False, from_dir=None, save_dir=None, max_age_hours=24, force_r
                 pmap = {p.name: p.id for p in db.query(Publisher).all()}
                 row_fail += 1
                 logger.error(f"{jid}: gagal dimasukkan ({e})")
+            if n % 20 == 0:
+                runs.heartbeat(db, run_row.id)
 
         for jid in back:
             j = known[jid]
             if j.status == JournalStatus.unverified:
-                _write_change(db, run.id, jid, "status", "unverified", "active")
+                _write_change(db, run_row.id, jid, "status", "unverified", "active")
                 j.status, j.is_active, j.last_seen_at = JournalStatus.active, True, seen_at
             else:
                 logger.warning(f"{jid}: berstatus {j.status.value} tetapi muncul lagi di listing, tidak diubah")
         db.commit()
 
-        if hold is None:
-            for jid in confirmed:
-                j = known[jid]
-                _write_change(db, run.id, jid, "status", j.status.value, "unverified")
-                j.status, j.is_active = JournalStatus.unverified, False
-        else:
-            for jid in (cands if len(cands) > MAX_CEK_KANDIDAT else confirmed):
-                _write_change(db, run.id, jid, "kandidat_hilang", "active", None)
-        db.commit()
+        escalated = 0
+        if do_new:
+            if hold is None:
+                for jid in confirmed:
+                    j = known[jid]
+                    _write_change(db, run_row.id, jid, "status", j.status.value, "unverified")
+                    j.status, j.is_active = JournalStatus.unverified, False
+                if esc_conf and len(esc_conf) <= MAX_TANDAI:
+                    for jid in esc_conf:
+                        _write_change(db, run_row.id, jid, "status", "unverified", "inactive")
+                        known[jid].status = JournalStatus.inactive
+                        escalated += 1
+            else:
+                for jid in (cands if len(cands) > MAX_CEK_KANDIDAT else confirmed):
+                    _write_change(db, run_row.id, jid, "kandidat_hilang", "active", None)
+            db.commit()
 
-        seen = [i for i in rows if i in known]
         db.execute(text("UPDATE journals SET last_seen_at = :ts WHERE id = ANY(:ids)"),
-                   {"ts": seen_at, "ids": seen})
+                   {"ts": seen_at, "ids": seen_ids})
         db.commit()
 
         notes = [hold] if hold else []
+        if escalated:
+            notes.append(f"{escalated} jurnal unverified menjadi inactive")
         if unknown:
             notes.append(f"{len(unknown)} kandidat tidak dapat dipastikan")
         if profile_fail:
-            notes.append(f"{profile_fail} riwayat tidak diambil")
+            notes.append(f"{profile_fail} profil dilewati")
         if row_fail:
             notes.append(f"{row_fail} jurnal gagal dimasukkan")
         finish("paused" if hold else "success", "; ".join(notes) or None,
                sinta_total=data["total_records"], db_total_before=active_total,
-               total_processed=len(rows), total_inserted=inserted,
+               total_processed=len(rows), total_inserted=inserted, total_updated=len(plan),
+               total_skipped=len(seen_ids) - len(plan),
                total_flagged=0 if hold else len(confirmed))
     except Exception as e:
         db.rollback()
-        if run is not None:
-            runs.finish(db, run.id, "failed", error=str(e)[:500])
+        if run_row is not None:
+            runs.finish(db, run_row.id, "failed", error=str(e)[:500])
         raise
     finally:
         db.close()
+
+
+def run_update(**kw):
+    return run("update", **kw)
+
+
+def run_new(**kw):
+    return run("new", **kw)
+
+
+def run_full(**kw):
+    return run("full", **kw)
