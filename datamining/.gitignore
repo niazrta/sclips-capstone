@@ -12,3 +12,4 @@ audit_log*.txt
 schema_dump.sql
 recover_log*.txt
 *_out.txt
+logs/
