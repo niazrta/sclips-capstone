@@ -64,13 +64,18 @@ def read_listing(from_dir=None, save_dir=None, on_progress=None):
         failed = [p for p in range(1, total_pages + 1) if p not in pages]
     else:
         pages[1], failed = html1, []
+        streak = 0
         for p in range(2, total_pages + 1):
             time.sleep(config.SCRAPE_DELAY_SECONDS)
             html = _safe_get(LIST_URL_TEMPLATE.format(page=p))
             if html is None:
                 failed.append(p)
+                streak += 1
+                if streak >= 10:
+                    raise RuntimeError("10 halaman gagal beruntun, SINTA kemungkinan membatasi akses")
             else:
                 pages[p] = html
+                streak = 0
             if p % 50 == 0 and on_progress:
                 on_progress()
             if p % 200 == 0:

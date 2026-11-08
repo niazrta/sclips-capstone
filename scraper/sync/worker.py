@@ -8,6 +8,60 @@ from utils.logger import get_logger
 logger = get_logger("sync.worker")
 POLL_SECONDS = 30
 
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from sqlalchemy.exc import IntegrityError
+
+from db.models import SyncSchedule
+
+
+def next_run(s, after):
+    """Waktu jalan berikutnya (UTC) setelah 'after'. Return None bila jadwal sekali jalan sudah lewat."""
+    tz = ZoneInfo(s.timezone)
+    base = after.astimezone(tz)
+    if s.frequency == "date":
+        t = datetime.combine(s.run_date, s.run_time, tz)
+        return t.astimezone(timezone.utc) if t > base else None
+    for i in range(0, 62):
+        d = (base + timedelta(days=i)).date()
+        t = datetime.combine(d, s.run_time, tz)
+        if t <= base:
+            continue
+        if s.frequency == "daily":
+            ok = True
+        elif s.frequency == "weekly":
+            ok = d.weekday() in (s.weekdays or [])
+        elif s.frequency == "monthly":
+            ok = d.day == s.month_day
+        else:
+            return None            # cron belum didukung
+        if ok:
+            return t.astimezone(timezone.utc)
+    return None
+
+
+def schedule_due(db):
+    """Buat satu baris queued untuk tiap jadwal aktif yang jatuh tempo. Return jumlahnya."""
+    now = datetime.now(timezone.utc)
+    made = 0
+    for s in db.query(SyncSchedule).filter(SyncSchedule.is_active.is_(True)).all():
+        if s.next_run_at is None:                  # jadwal baru dinyalakan
+            s.next_run_at = next_run(s, now)
+            db.commit()
+            continue
+        if s.next_run_at > now:
+            continue
+        run = runs.request_run(db, s.scope, "scheduled", requested_by=s.name)
+        if run is None:                            # ada run aktif, coba lagi di putaran berikutnya
+            continue
+        s.last_run_at, s.next_run_at = now, next_run(s, now)
+        if s.next_run_at is None and s.frequency == "date":
+            s.is_active = False
+        db.commit()
+        made += 1
+    return made
+
 
 def tick(from_dir=None, max_age_hours=24):
     """Satu putaran: pulihkan run macet, ambil satu baris queued, jalankan. Return True bila ada kerja."""
@@ -16,6 +70,7 @@ def tick(from_dir=None, max_age_hours=24):
         n = runs.recover_stale(db)
         if n:
             logger.warning(f"{n} run macet ditandai failed")
+        schedule_due(db)
         run = runs.claim_next(db)
         if run is None:
             return False
