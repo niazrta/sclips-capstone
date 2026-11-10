@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, BigInteger, String, Boolean, Integer,
-    ForeignKey, DateTime, Enum, Text, Numeric, Date, Time, func, UniqueConstraint
+    ForeignKey, DateTime, Enum, Text, Numeric, Date, Time, func, text, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 import enum
@@ -45,7 +45,7 @@ class Journal(Base):
     name = Column(String, nullable=False)
     e_issn = Column(String, nullable=True)
     p_issn = Column(String, nullable=True)
-    subject = Column(String, nullable=True)            # diisi ML setelah klasifikasi
+    subject = Column(String, nullable=True)            # subjek asli SINTA, tidak pernah ditimpa ML
     is_active = Column(Boolean, default=True, nullable=False)
     status = Column(Enum(JournalStatus), default=JournalStatus.unverified, nullable=False)
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
@@ -68,13 +68,18 @@ class Journal(Base):
 
     publisher = relationship("Publisher", back_populates="journals")
     rank_histories = relationship("JournalRankHistory", back_populates="journal")
-    
+
     predicted_subject_sinta = Column(String, nullable=True)
     predicted_subject_sinta_multilabel = Column(String, nullable=True)
     predicted_subject_scopus = Column(String, nullable=True)
     predicted_subject_scopus_27 = Column(String, nullable=True)
     scopus_confidence = Column(Numeric(6, 3), nullable=True)
     predictions_updated_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Hasil layanan ML: seluruh baris disimpan, termasuk Unknown dan Needs Review
+    predicted_status = Column(String, nullable=True)            # Classified | Needs Review
+    predicted_review_reasons = Column(Text, nullable=True)      # alasan Needs Review, dipisah "; "
+    predicted_model_version = Column(String, nullable=True)
 
     last_detail_scraped_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -115,11 +120,13 @@ class SyncRun(Base):
     __tablename__ = "sync_runs"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    scope = Column(String, nullable=False)           # new | update | full
+    scope = Column(String, nullable=False)           # update | full
     source = Column(String, nullable=True)           # listing | profile | null = sesuai cakupan
     trigger = Column(String, nullable=False)         # scheduled | manual
     requested_by = Column(String, nullable=True)     # admin atau nama jadwal
-    target_id = Column(BigInteger, nullable=True)    # ID jurnal bila hanya satu jurnal
+    target_id = Column(BigInteger, nullable=True)    # ID jurnal bila hanya satu jurnal (hanya cakupan update)
+    run_ml_predict = Column(Boolean, nullable=False, default=False,
+                            server_default=text("false"))   # panggil prediksi ML setelah run sukses
     status = Column(String, nullable=False, default="queued")  # queued|running|success|failed|paused
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
@@ -135,13 +142,23 @@ class SyncRun(Base):
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # Pengukuran untuk pengujian (lama proses dan konteks perangkat keras)
+    duration_seconds = Column(Numeric(10, 1), nullable=True)
+    http_requests = Column(Integer, nullable=True)
+    bytes_downloaded = Column(BigInteger, nullable=True)     # perkiraan dari ukuran halaman
+    cpu_avg_percent = Column(Numeric(6, 1), nullable=True)   # persen satu inti, bisa lebih dari 100
+    cpu_peak_percent = Column(Numeric(6, 1), nullable=True)
+    ram_peak_mb = Column(Numeric(10, 1), nullable=True)
+    db_size_mb = Column(Numeric(10, 1), nullable=True)
+    host_info = Column(Text, nullable=True)                  # JSON: OS, Python, inti CPU, total RAM
+
 
 class SyncSchedule(Base):
     __tablename__ = "sync_schedules"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
-    scope = Column(String, nullable=False)           # new | update | full
+    scope = Column(String, nullable=False)           # update | full
     frequency = Column(String, nullable=False)       # daily | weekly | monthly | date | cron
     weekdays = Column(ARRAY(Integer), nullable=True) # 0 = Senin ... 6 = Minggu
     month_day = Column(Integer, nullable=True)

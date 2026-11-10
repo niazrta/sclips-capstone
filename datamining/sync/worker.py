@@ -1,19 +1,20 @@
+"""Worker sinkronisasi: memeriksa jadwal, mengambil run dari antrean, menjalankan engine.
+
+Tiga jalur masuk (jadwal, baris manual di sync_runs, terminal) berakhir di engine.run.
+Setelah run sukses, prediksi ML dijalankan bila run_ml_predict aktif.
+"""
 import argparse
 import time
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
+from db.models import SyncRun, SyncSchedule
 from db.session import SessionLocal
-from sync import engine, runs
+from sync import engine, ml, runs
 from utils.logger import get_logger
 
 logger = get_logger("sync.worker")
 POLL_SECONDS = 30
-
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
-
-from sqlalchemy.exc import IntegrityError
-
-from db.models import SyncSchedule
 
 
 def next_run(s, after):
@@ -52,7 +53,8 @@ def schedule_due(db):
             continue
         if s.next_run_at > now:
             continue
-        run = runs.request_run(db, s.scope, "scheduled", requested_by=s.name)
+        run = runs.request_run(db, s.scope, "scheduled", requested_by=s.name,
+                               run_ml_predict=s.after_ml_predict)
         if run is None:                            # ada run aktif, coba lagi di putaran berikutnya
             continue
         s.last_run_at, s.next_run_at = now, next_run(s, now)
@@ -74,16 +76,43 @@ def tick(from_dir=None, max_age_hours=24):
         run = runs.claim_next(db)
         if run is None:
             return False
-        scope, rid = run.scope, run.id
+        scope, rid, target, with_ml, source = run.scope, run.id, run.target_id, run.run_ml_predict, run.source
     finally:
         db.close()
 
-    logger.info(f"Menjalankan run {rid} (scope={scope})")
+    logger.info(f"Menjalankan run {rid} (scope={scope}, target={target}, ml={with_ml})")
     try:
-        engine.run(scope, apply=True, run_id=rid, from_dir=from_dir, max_age_hours=max_age_hours)
+        engine.run(scope, apply=True, run_id=rid, from_dir=from_dir, max_age_hours=max_age_hours,
+                   ids={target} if target else None, source=source)
     except Exception as e:           # engine sudah menandai run failed
         logger.error(f"Run {rid} gagal: {e}")
+        return True
+    if with_ml:
+        _predict_after(rid)
     return True
+
+
+def _predict_after(rid):
+    """Prediksi ML setelah run sukses. Kegagalan dicatat di run, status sinkronisasi tidak berubah."""
+    db = SessionLocal()
+    try:
+        run = db.get(SyncRun, rid)
+        if run.status != "success":
+            return
+        try:
+            res = ml.predict_pending(db, run_id=rid)
+            note = f"prediksi ML: {res['predicted']} jurnal"
+        except ml.MLNotConfigured as e:
+            note = f"prediksi ML dilewati ({e})"
+        except Exception as e:
+            db.rollback()
+            note = f"prediksi ML gagal ({str(e)[:200]})"
+            logger.error(f"Run {rid}: {note}")
+        run = db.get(SyncRun, rid)
+        run.error_message = (f"{run.error_message}; " if run.error_message else "") + note
+        db.commit()
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

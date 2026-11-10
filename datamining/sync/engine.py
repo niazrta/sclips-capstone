@@ -26,6 +26,7 @@ FIELDS = ["name", "subject", "e_issn", "e_issn_status", "p_issn", "p_issn_status
           "impact", "h5_index", "citations_5yr", "citations",
           "website", "editor_url", "google_scholar_url", "garuda_id", "cover_url"]
 METRICS = {"impact", "h5_index", "citations_5yr", "citations"}
+_NET = {"requests": 0, "bytes": 0}   # jumlah permintaan dan perkiraan byte, dicatat per run
 TOTALS = re.compile(r"Page\s+[\d.,]+\s+of\s+([\d.,]+)\s*\|\s*Total Records\s+([\d.,]+)", re.I)
 
 MAX_CEK_KANDIDAT = 100   # lebih dari ini: run dijeda, profil tidak dicek
@@ -44,6 +45,14 @@ def _norm(v):
     return v
 
 
+def _get_page(url):
+    """Ambil satu halaman daftar dan catat jumlah permintaan serta ukurannya."""
+    html = _safe_get(url)
+    _NET["requests"] += 1
+    _NET["bytes"] += len(html.encode("utf-8")) if html else 0
+    return html
+
+
 def read_listing(from_dir=None, save_dir=None, on_progress=None):
     """Baca seluruh listing dari SINTA, atau dari salinan di from_dir."""
     pages = {}
@@ -54,7 +63,7 @@ def read_listing(from_dir=None, save_dir=None, on_progress=None):
                 pages[n] = f.read()
         html1 = pages.get(1)
     else:
-        html1 = _safe_get(LIST_URL_TEMPLATE.format(page=1))
+        html1 = _get_page(LIST_URL_TEMPLATE.format(page=1))
     m = TOTALS.search(html1 or "")
     if not m:
         raise RuntimeError("Halaman 1 tidak terbaca atau Total Records tidak ditemukan")
@@ -67,7 +76,7 @@ def read_listing(from_dir=None, save_dir=None, on_progress=None):
         streak = 0
         for p in range(2, total_pages + 1):
             time.sleep(config.SCRAPE_DELAY_SECONDS)
-            html = _safe_get(LIST_URL_TEMPLATE.format(page=p))
+            html = _get_page(LIST_URL_TEMPLATE.format(page=p))
             if html is None:
                 failed.append(p)
                 streak += 1
@@ -82,7 +91,7 @@ def read_listing(from_dir=None, save_dir=None, on_progress=None):
                 logger.info(f"Listing {p}/{total_pages}, gagal {len(failed)}")
         for p in list(failed):
             time.sleep(5)
-            html = _safe_get(LIST_URL_TEMPLATE.format(page=p))
+            html = _get_page(LIST_URL_TEMPLATE.format(page=p))
             if html is not None:
                 pages[p] = html
                 failed.remove(p)
@@ -110,6 +119,8 @@ def fetch_profile(jid):
         except requests.exceptions.RequestException:
             time.sleep(3)
             continue
+        _NET["requests"] += 1
+        _NET["bytes"] += len(r.content)
         if r.status_code == 200:
             return r.text, "ok"
         if 300 <= r.status_code < 400:
@@ -232,12 +243,72 @@ def _fresh(from_dir, max_age_hours):
     return True
 
 
-# ---------- satu program untuk tiga cakupan ----------
+def _run_profile(db, run_row, ids, apply, finish):
+    """Update per jurnal lewat halaman profil saja (sekitar 2 detik per jurnal, tanpa membaca listing).
+
+    Profil hanya memuat riwayat akreditasi, sehingga hanya itu yang diperbarui. Kolom yang
+    berasal dari listing (nama, ISSN, penerbit, metrik, tautan) diperbarui oleh run 'update'.
+    """
+    now = datetime.now(timezone.utc)
+    found = {j.id: j for j in db.query(Journal).filter(Journal.id.in_(ids)).all()}
+    missing = sorted(set(ids) - set(found))
+    changed = failed = 0
+    redirected = []
+    for n, jid in enumerate(sorted(found), 1):
+        html, state = fetch_profile(jid)
+        time.sleep(config.SCRAPE_DELAY_SECONDS)
+        try:
+            if html is None:
+                if state == "redirect":
+                    redirected.append(jid)
+                raise ValueError(f"profil {state}")
+            history = parse_detail_page(html)["accreditation_history"]
+            have = {h.accreditation_year: h.sinta_rank for h in
+                    db.query(JournalRankHistory).filter_by(journal_id=jid).all()}
+            diff = [(h["year"], have.get(h["year"]), h["rank"]) for h in history
+                    if have.get(h["year"]) != h["rank"]]
+            print(f"{jid}: riwayat di SINTA {len(history)} tahun, berubah/baru {len(diff)} {diff[:5]}")
+            if apply:
+                apply_history(db, run_row.id, jid, history, now)
+                found[jid].last_detail_scraped_at = now
+                db.commit()
+            changed += 1 if diff else 0
+        except Exception as e:
+            db.rollback()
+            failed += 1
+            logger.warning(f"{jid}: profil dilewati ({e})")
+        if run_row is not None and n % 10 == 0:
+            runs.heartbeat(db, run_row.id, total_processed=n)
+    notes = []
+    if missing:
+        notes.append(f"ID tidak ada di database: {missing}")
+    if redirected:
+        notes.append(f"profil dialihkan, periksa dengan cakupan full: {redirected}")
+    if failed:
+        notes.append(f"{failed} profil dilewati")
+    print(f"\nJurnal diproses: {len(found)} | berubah: {changed} | dilewati: {failed}")
+    if not apply:
+        print("DRY-RUN: tidak ada yang diubah.")
+    finish("success" if found and failed < len(found) else "failed", "; ".join(notes) or None,
+           total_processed=len(found), total_updated=changed, total_skipped=len(found) - changed - failed)
+
+
+# ---------- satu program untuk dua cakupan: update dan full ----------
 
 def run(scope, apply=False, from_dir=None, save_dir=None, limit=None, ids=None,
-        max_age_hours=24, force_read=False, run_id=None):
-    if scope not in ("new", "update", "full"):
-        raise ValueError(f"cakupan tidak dikenal: {scope}")
+        max_age_hours=24, run_id=None, source=None):
+    """Sinkronisasi dengan SINTA.
+
+    scope 'update': perbarui metadata jurnal yang sudah ada di database.
+    scope 'full'  : update, ditambah jurnal baru dan jurnal yang menghilang dari daftar.
+    source 'profile' (hanya update + ids): update per jurnal lewat halaman profil, tanpa membaca listing.
+    """
+    if scope not in ("update", "full"):
+        raise ValueError(f"cakupan tidak dikenal: {scope} (pilihan: update, full)")
+    if source not in (None, "listing", "profile"):
+        raise ValueError(f"sumber tidak dikenal: {source}")
+    if source == "profile" and (scope != "update" or not ids or from_dir):
+        raise ValueError("source 'profile' hanya untuk cakupan update, wajib ids, tanpa from_dir")
     if apply and from_dir and not _fresh(from_dir, max_age_hours):
         if run_id is not None:
             d = SessionLocal()
@@ -245,13 +316,28 @@ def run(scope, apply=False, from_dir=None, save_dir=None, limit=None, ids=None,
             d.close()
         return
     print("Database:", db_engine.url.database)
-    do_update = scope in ("update", "full")
-    do_new = scope in ("new", "full")
+    do_update = True                  # kedua cakupan memperbarui jurnal yang sudah ada
+    do_new = scope == "full"          # hanya 'full' mencari jurnal baru dan jurnal yang hilang
     db = SessionLocal()
     run_row = None
+    monitor = None
+    host = runs.host_info()
+    _NET.update(requests=0, bytes=0)
+
+    def measures():
+        """Pengukuran akhir run: CPU, RAM, jaringan, ukuran database, spesifikasi mesin."""
+        m = monitor.stop() if monitor else {}
+        m.update(http_requests=_NET["requests"], bytes_downloaded=_NET["bytes"], host_info=host)
+        try:
+            size = db.execute(text("SELECT pg_database_size(current_database())")).scalar()
+            m["db_size_mb"] = round(size / 1024 ** 2, 1)
+        except Exception:
+            db.rollback()
+        return m
 
     def finish(status, note=None, **counters):
         if run_row is not None:
+            counters.update(measures())
             runs.heartbeat(db, run_row.id, **counters)
             runs.finish(db, run_row.id, status, error=note)
         print(f"\nSTATUS: {status}" + (f" ({note})" if note else ""))
@@ -260,25 +346,22 @@ def run(scope, apply=False, from_dir=None, save_dir=None, limit=None, ids=None,
         if run_id is not None:
             run_row = db.get(SyncRun, run_id)      # baris queued yang sudah diklaim worker
         elif apply:
-            run_row = runs.request_run(db, scope, "manual", requested_by="cli")
+            single = next(iter(ids)) if ids and len(ids) == 1 else None
+            run_row = runs.request_run(db, scope, "manual", source=source, requested_by="cli",
+                                      target_id=single)
             if run_row is None:
                 print("Sudah ada run aktif, dibatalkan.")
                 return
             runs.claim_next(db)
 
-        active_total = db.query(Journal).filter(Journal.is_active.is_(True)).count()
+        if run_row is not None:
+            monitor = runs.ResourceMonitor().start()
 
-        # pra-pengecekan murah: hanya cakupan 'new'
-        if scope == "new" and not from_dir and not force_read:
-            m = TOTALS.search(_safe_get(LIST_URL_TEMPLATE.format(page=1)) or "")
-            if not m:
-                raise RuntimeError("Halaman 1 tidak terbaca atau Total Records tidak ditemukan")
-            sinta_total = _num(m.group(2))
-            print(f"Total Records SINTA: {sinta_total} | jurnal aktif di database: {active_total}")
-            if sinta_total == active_total:
-                finish("success", "angka sama, listing tidak dibaca",
-                       sinta_total=sinta_total, db_total_before=active_total)
-                return
+        if source == "profile":
+            _run_profile(db, run_row, ids, apply, finish)
+            return
+
+        active_total = db.query(Journal).filter(Journal.is_active.is_(True)).count()
 
         beat = (lambda: runs.heartbeat(db, run_row.id)) if run_row else None
         data = read_listing(from_dir, save_dir, on_progress=beat)
@@ -310,7 +393,7 @@ def run(scope, apply=False, from_dir=None, save_dir=None, limit=None, ids=None,
             blanked = [j.id for j, _, ch in plan if any(f == "subject" and n is None for f, _, n in ch)]
             print(f"\nJurnal terbaca dan sudah ada di database : {len(seen_ids)}")
             if scope == "update":
-                print(f"Jurnal di listing tapi belum ada (diabaikan): {not_in_db}")
+                print(f"Jurnal di listing tapi belum ada (diabaikan, ditambahkan oleh 'full'): {not_in_db}")
             print(f"Jurnal yang berubah                      : {len(plan)}")
             print("Perubahan per field                      :", by_field)
             print(f"Subject dikosongkan                      : {len(blanked)} {blanked[:10]}")
@@ -457,6 +540,10 @@ def run(scope, apply=False, from_dir=None, save_dir=None, limit=None, ids=None,
     except Exception as e:
         db.rollback()
         if run_row is not None:
+            try:
+                runs.heartbeat(db, run_row.id, **measures())
+            except Exception:
+                db.rollback()
             runs.finish(db, run_row.id, "failed", error=str(e)[:500])
         raise
     finally:
@@ -465,10 +552,6 @@ def run(scope, apply=False, from_dir=None, save_dir=None, limit=None, ids=None,
 
 def run_update(**kw):
     return run("update", **kw)
-
-
-def run_new(**kw):
-    return run("new", **kw)
 
 
 def run_full(**kw):
