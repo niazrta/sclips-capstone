@@ -88,19 +88,22 @@ def tick(from_dir=None, max_age_hours=24):
         logger.error(f"Run {rid} gagal: {e}")
         return True
     if with_ml:
-        _predict_after(rid)
+        _predict_after(rid, target)
     return True
 
 
-def _predict_after(rid):
-    """Prediksi ML setelah run sukses. Kegagalan dicatat di run, status sinkronisasi tidak berubah."""
+def _predict_after(rid, target=None):
+    """Prediksi ML setelah run sukses, sesuai aturan tim ML:
+    update/full -> semua jurnal aktif diklasifikasikan ulang (ukuran penerbit ikut segar);
+    update satu jurnal -> hanya jurnal itu. Kegagalan dicatat di run, status sinkronisasi tidak berubah."""
     db = SessionLocal()
     try:
         run = db.get(SyncRun, rid)
         if run.status != "success":
             return
         try:
-            res = ml.predict_pending(db, run_id=rid)
+            res = ml.predict_pending(db, run_id=rid, all_active=target is None,
+                                    only_ids={target} if target else None)
             note = f"prediksi ML: {res['predicted']} jurnal"
         except ml.MLNotConfigured as e:
             note = f"prediksi ML dilewati ({e})"
