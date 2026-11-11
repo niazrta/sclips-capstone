@@ -13,24 +13,35 @@ alembic upgrade head
 
 ## Sinkronisasi
 ```
-python -m sync --scope new            # dry-run; tambah --apply untuk menulis
-python -m sync --scope update
+python -m sync --scope update                    # simulasi; tambah --apply untuk menulis
 python -m sync --scope full
-python -m sync.worker                 # penjadwal dan pengambil antrean
+python -m sync --scope update --ids 3856 --profile    # satu jurnal lewat profil (cepat)
+python -m sync.worker                            # penjadwal dan pengambil antrean
 ```
-Tanpa `--apply`, tidak ada yang ditulis. Opsi uji: `--from-dir` (baca salinan listing), `--ids`, `--limit`. Definisi lengkap: `docs/SINKRONISASI.md`.
+Dua cakupan: `update` (perbarui jurnal yang ada) dan `full` (update, jurnal baru, jurnal hilang; lebih jarang dijalankan). Tanpa `--apply`, tidak ada yang ditulis. Opsi uji: `--from-dir` (baca salinan listing), `--offline`, `--ids`, `--limit`. Setiap run mencatat durasi, CPU, RAM, ukuran database, dan spesifikasi mesin di `sync_runs`. Definisi lengkap: `docs/SINKRONISASI.md`.
 
-## Pertukaran dengan ML
+## Prediksi ML
+Dijalankan worker setelah run sukses bila `run_ml_predict` aktif. Pengaturan lewat variabel lingkungan `ML_SERVICE_URL` dan `ML_MODEL_SHA256`.
+```
+python -m sync.ml                  # simulasi: jumlah jurnal yang menunggu
+python -m sync.ml --apply          # kirim ke layanan ML dan simpan
+python -m sync.ml --all --apply    # semua jurnal aktif
+```
+
+## Pertukaran dengan ML (berkas)
 ```
 python utils\export.py
-python scripts\import_ml_predictions.py <csv>          # dry-run
-python scripts\import_ml_predictions.py <csv> --apply
+python scripts\import_ml_predictions.py <csv atau xlsx>          # simulasi
+python scripts\import_ml_predictions.py <csv atau xlsx> --apply
 ```
 
 ## Tes
+Gunakan database uji (bukan database utama): tes menulis dan menghapus baris.
 ```
 python tests\test_parser.py [folder_listing]
 python tests\test_runs.py
+python tests\test_ml.py
+python tests\test_profile.py
 ```
 
 ## Struktur
