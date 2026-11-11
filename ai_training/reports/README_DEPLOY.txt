@@ -50,9 +50,15 @@ ISI PAKET
     0_Daftar_Isi         1_Untuk_Data_Mining      2_Full_16768_Jurnal (+ data asal, contoh tampilan katalog, hasil v2.6)
     3_Prediksi_Tanpa_Subjek (1.785)   4_Needs_Review (129)   5_Ringkasan   6_Evaluasi_Model
     7_Keandalan_Keyakinan   8_Presisi_Per_Subjek   9_Kamus_Akar_Kata   10_Eks_Unknown_v2.6 (1.102)
-    11_Confusion_Matrix     12_Kamus_Kolom
+    11_Confusion_Matrix     12_Kamus_Kolom   13_Perbandingan_Algoritma
 - evaluation_report_v2.7.json      -> laporan evaluasi lengkap
-- reliability_v2.7.png, v26_vs_v27.png, cm_sinta_10_v2.7.png -> gambar untuk laporan
+- reliability_v2.7.png, v26_vs_v27.png         -> keandalan keyakinan; perbandingan v2.6 vs v2.7
+- cm_sinta_10_v2.7.png, cm_sinta_10_v2.7_penerbit_baru.png, cm_scopus_4_v2.7.png
+                                   -> confusion matrix SVM (utama) vs Naive Bayes vs Random Forest, fitur & data uji sama
+                                      (SINTA-10 akurasi: SVM 86,90% | NB 83,94% | RF 85,72% pada uji per judul;
+                                       sheet 13_Perbandingan_Algoritma di Excel)
+- cm_publisher_type_model_v2.6.png, cm_scopus_27_model_v2.6.png
+                                   -> confusion matrix tipe penerbit & Scopus-27; model ini tidak dilatih ulang di v2.7
 - train_v27.py                     -> skrip pelatihan (butuh journals_classified_v2.6.xlsx & sclips_models_v2.6.pkl
                                       di folder yang sama, atau set SCLIPS_TRAIN_XLSX / SCLIPS_V26_PKL)
 
