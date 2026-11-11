@@ -1,0 +1,8 @@
+# Versi numerik WAJIB sama dengan saat training (model .pkl dibuat dengan versi ini)
+scikit-learn==1.6.1
+numpy==2.4.6
+scipy==1.16.3
+# Service
+fastapi>=0.110
+pydantic>=2,<3
+uvicorn>=0.29

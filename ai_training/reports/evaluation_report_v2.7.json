@@ -1,0 +1,621 @@
+{
+ "model_version": "v2.7-LinearSVM-Calibrated-Lexicon-16768",
+ "model_sha256": "5e9841f96ba473a6faefe1d7a2b853e6c3393b3ccc92960c2f1a23c79886fd37",
+ "ringkasan_metode": {
+  "subjek_sinta": "LinearSVC (C=0.25) + kalibrasi sigmoid; dilatih dari SEMUA subjek SINTA tiap jurnal (bobot 1/k); fitur: TF-IDF kata (1-2) + n-gram karakter 3-5 (30.000) atas judul bersih, token nama penerbit, token kamus akar kata (judul & penerbit), token sebaran subjek jurnal lain dari penerbit yang sama.",
+  "keyakinan": "Kalibrasi isotonik out-of-fold (5 fold, kelompok per judul) terhadap subjek SINTA asli; dipisah untuk penerbit yang sudah dikenal vs penerbit baru. Keyakinan = peluang label yang ditampilkan memang subjek jurnal itu.",
+  "label_tampil": "Satu subjek bila keyakinan >= 70%; selain itu dua subjek teratas (peluang salah satunya benar >= 70%); cadangan: rumpun ilmu. Tidak ada label Unknown.",
+  "scopus_4": "Diturunkan dari probabilitas subjek SINTA (jumlah per rumpun) -> selalu konsisten dengan predicted_subject_sinta_multilabel.",
+  "scopus_27": "Model Scopus-27 v2.6 (tidak dilatih ulang), dibatasi ke bidang yang sah untuk label SINTA terpilih.",
+  "tipe_penerbit": "Model & aturan v2.6; tambahan: aturan press kampus bergabung (mis. Unpadpress) dan aturan bawaan penerbit independen (COM) untuk nama tanpa kata dikenal. Jurnal tanpa nama penerbit (kosong / \"Unknown\") tidak diberi tipe & ukuran (null).",
+  "multidisiplin": "Hanya bila subject_sinta dikirim dan berisi >= 4 subjek: subject_display = \"Multidisciplinary\". Dengan payload Data Mining (tanpa subject_sinta) kolom predicted_* murni hasil ML; tampilan Multidisciplinary dibentuk di view journals_public."
+ },
+ "evaluasi_split_per_judul": {
+  "n_test": 2977,
+  "label_correct_pct": 89.65,
+  "top1_inset_pct": 86.9,
+  "label_conf_ge70_pct": 100.0,
+  "mean_label_confidence_pct": 89.55,
+  "unknown_label_count": 0,
+  "levels": {
+   "subjek": {
+    "coverage_pct": 87.03,
+    "correct_pct": 90.31,
+    "mean_conf_pct": 90.45
+   },
+   "dua_subjek": {
+    "coverage_pct": 12.97,
+    "correct_pct": 85.23,
+    "mean_conf_pct": 83.5,
+    "both_correct_pct": 36.27
+   }
+  },
+  "reliability": [
+   {
+    "band": "70-80",
+    "n": 590,
+    "mean_conf": 75.07,
+    "actual_correct": 75.59
+   },
+   {
+    "band": "80-90",
+    "n": 721,
+    "mean_conf": 85.87,
+    "actual_correct": 86.82
+   },
+   {
+    "band": "90-100",
+    "n": 1666,
+    "mean_conf": 96.26,
+    "actual_correct": 95.86
+   }
+  ],
+  "v26_unknown_subset": {
+   "n": 204,
+   "label_correct_pct": 74.51,
+   "top1_inset_pct": 67.16,
+   "single_subject_pct": 68.63
+  },
+  "per_class": {
+   "Agriculture": {
+    "predicted_n": 129,
+    "precision_inset_pct": 84.5
+   },
+   "Art": {
+    "predicted_n": 38,
+    "precision_inset_pct": 89.47
+   },
+   "Economy": {
+    "predicted_n": 367,
+    "precision_inset_pct": 90.74
+   },
+   "Education": {
+    "predicted_n": 933,
+    "precision_inset_pct": 87.57
+   },
+   "Engineering": {
+    "predicted_n": 192,
+    "precision_inset_pct": 89.06
+   },
+   "Health": {
+    "predicted_n": 271,
+    "precision_inset_pct": 98.15
+   },
+   "Humanities": {
+    "predicted_n": 46,
+    "precision_inset_pct": 54.35
+   },
+   "Religion": {
+    "predicted_n": 110,
+    "precision_inset_pct": 90.0
+   },
+   "Science": {
+    "predicted_n": 356,
+    "precision_inset_pct": 85.67
+   },
+   "Social": {
+    "predicted_n": 535,
+    "precision_inset_pct": 80.0
+   }
+  },
+  "split": "eval-title",
+  "n_train": 12006,
+  "oof": {
+   "n": 12006,
+   "with_publisher_prior_pct": 68.4,
+   "top1_inset_pct": 86.62
+  },
+  "secs": 175
+ },
+ "evaluasi_split_per_penerbit_baru": {
+  "n_test": 3267,
+  "label_correct_pct": 89.47,
+  "top1_inset_pct": 86.38,
+  "label_conf_ge70_pct": 99.97,
+  "mean_label_confidence_pct": 90.16,
+  "unknown_label_count": 0,
+  "levels": {
+   "subjek": {
+    "coverage_pct": 83.59,
+    "correct_pct": 90.66,
+    "mean_conf_pct": 91.22
+   },
+   "dua_subjek": {
+    "coverage_pct": 16.19,
+    "correct_pct": 83.36,
+    "mean_conf_pct": 84.66,
+    "both_correct_pct": 37.62
+   },
+   "rumpun": {
+    "coverage_pct": 0.21,
+    "correct_pct": 85.71,
+    "mean_conf_pct": 89.61
+   }
+  },
+  "reliability": [
+   {
+    "band": "70-80",
+    "n": 221,
+    "mean_conf": 73.54,
+    "actual_correct": 71.49
+   },
+   {
+    "band": "80-90",
+    "n": 1022,
+    "mean_conf": 83.67,
+    "actual_correct": 80.33
+   },
+   {
+    "band": "90-100",
+    "n": 2023,
+    "mean_conf": 95.27,
+    "actual_correct": 96.05
+   }
+  ],
+  "v26_unknown_subset": {
+   "n": 212,
+   "label_correct_pct": 77.83,
+   "top1_inset_pct": 69.81,
+   "single_subject_pct": 57.55
+  },
+  "per_class": {
+   "Agriculture": {
+    "predicted_n": 158,
+    "precision_inset_pct": 82.91
+   },
+   "Art": {
+    "predicted_n": 28,
+    "precision_inset_pct": 85.71
+   },
+   "Economy": {
+    "predicted_n": 394,
+    "precision_inset_pct": 88.32
+   },
+   "Education": {
+    "predicted_n": 987,
+    "precision_inset_pct": 88.65
+   },
+   "Engineering": {
+    "predicted_n": 189,
+    "precision_inset_pct": 92.06
+   },
+   "Health": {
+    "predicted_n": 366,
+    "precision_inset_pct": 96.99
+   },
+   "Humanities": {
+    "predicted_n": 55,
+    "precision_inset_pct": 65.45
+   },
+   "Religion": {
+    "predicted_n": 113,
+    "precision_inset_pct": 82.3
+   },
+   "Science": {
+    "predicted_n": 393,
+    "precision_inset_pct": 80.41
+   },
+   "Social": {
+    "predicted_n": 584,
+    "precision_inset_pct": 80.48
+   }
+  },
+  "split": "eval-publisher",
+  "n_train": 11716,
+  "oof": {
+   "n": 11716,
+   "with_publisher_prior_pct": 69.8,
+   "top1_inset_pct": 87.05
+  },
+  "secs": 168
+ },
+ "hasil_16768_jurnal": {
+  "Versi model": "v2.7-LinearSVM-Calibrated-Lexicon-16768",
+  "SHA-256 model": "5e9841f96ba473a6faefe1d7a2b853e6c3393b3ccc92960c2f1a23c79886fd37",
+  "Cara membuat sheet 1": "POST /classify/predict, batch 1.000, payload sama dengan Data Mining: tanpa subject_sinta, dengan publisher_counts (jumlah jurnal aktif per publisher_id)",
+  "Jumlah jurnal": 16768,
+  "Label \"Unknown\" pada predicted_subject_sinta": 0,
+  "Label \"Unknown\" pada predicted_subject_sinta_multilabel": 0,
+  "Label \"Unknown\" pada predicted_subject_scopus": 0,
+  "Label \"Unknown\" pada predicted_subject_scopus_27": 0,
+  "Label \"Unknown\" pada predicted_publisher_type": 0,
+  "Status Classified": 16639,
+  "Status Needs Review": 129,
+  "Alasan Needs Review: confidence_penerbit_rendah": 129,
+  "Alasan Needs Review: konflik_aturan_vs_model": 41,
+  "Tingkat label ML (semua jurnal): subjek": 14589,
+  "Tingkat label ML (semua jurnal): dua_subjek": 2179,
+  "Keyakinan label ML >= 70% (semua jurnal, %)": 100.0,
+  "Jurnal tanpa subjek SINTA (1785): tingkat label subjek": 1545,
+  "Jurnal tanpa subjek SINTA (1785): tingkat label dua_subjek": 240,
+  "Jurnal tanpa subjek SINTA: rata-rata keyakinan label (%)": 90.04,
+  "Jurnal tanpa subjek SINTA: keyakinan >= 70% (%)": 100.0,
+  "Jurnal bersubjek SINTA: subjek teratas ML termasuk subjek SINTA asli (%, data latih - bukan akurasi; lihat 6_Evaluasi_Model)": 92.62,
+  "Jurnal bersubjek SINTA: rumpun Scopus ML sesuai rumpun subjek SINTA asli (%, data latih)": 96.97,
+  "Rumpun Scopus Social Sciences": 11472,
+  "Rumpun Scopus Physical Sciences": 2961,
+  "Rumpun Scopus Health Sciences": 1676,
+  "Rumpun Scopus Life Sciences": 659,
+  "Tipe penerbit HEI": 13658,
+  "Tipe penerbit COM": 2147,
+  "Tipe penerbit SOC": 524,
+  "Tipe penerbit GOV": 422,
+  "Tipe penerbit (kosong: tanpa penerbit)": 17,
+  "Asal tipe penerbit morphology_rule": 16044,
+  "Asal tipe penerbit model": 480,
+  "Asal tipe penerbit verified_override": 193,
+  "Asal tipe penerbit aturan_default_independen": 34,
+  "Asal tipe penerbit tanpa_penerbit": 17,
+  "Ukuran penerbit Small": 10277,
+  "Ukuran penerbit Medium": 6255,
+  "Ukuran penerbit Large": 219,
+  "Ukuran penerbit (kosong: tanpa penerbit)": 17,
+  "Contoh tampilan katalog, sumber sinta": 12848,
+  "Contoh tampilan katalog, sumber sinta_multidisiplin": 2135,
+  "Contoh tampilan katalog, sumber ml": 1785,
+  "Judul dengan kecocokan kamus akar kata (%)": 92.6,
+  "Waktu proses seluruh jurnal lewat API (detik)": 23.2
+ },
+ "eksperimen_pembanding": {
+  "exp2_title": [
+   {
+    "cfg": "title|v26|single",
+    "top1_inset": 83.28,
+    "cov70_single": 54.7,
+    "acc_single": 92.5,
+    "A_pair_cov": 30.4,
+    "A_pair_any": 94.5,
+    "A_pair_both": 42.0,
+    "A_rumpun_cov": 8.3,
+    "A_rumpun_acc": 94.4,
+    "A_rest": 6.6,
+    "B_rumpun_cov": 31.5,
+    "B_rumpun_acc": 96.9,
+    "B_pair_cov": 7.2,
+    "B_pair_any": 96.3,
+    "B_rest": 6.6,
+    "rumpun_top_acc": 94.92,
+    "rumpun_cov70": 86.2,
+    "unk_n": 204,
+    "unk_top1": 62.3,
+    "unk_single_cov": 14.7,
+    "unk_rumpun_acc": 89.2
+   },
+   {
+    "cfg": "title|v26|weighted",
+    "top1_inset": 86.22,
+    "cov70_single": 19.9,
+    "acc_single": 97.8,
+    "A_pair_cov": 33.2,
+    "A_pair_any": 98.1,
+    "A_pair_both": 43.2,
+    "A_rumpun_cov": 28.6,
+    "A_rumpun_acc": 97.0,
+    "A_rest": 18.2,
+    "B_rumpun_cov": 53.0,
+    "B_rumpun_acc": 98.0,
+    "B_pair_cov": 8.8,
+    "B_pair_any": 98.5,
+    "B_rest": 18.2,
+    "rumpun_top_acc": 94.28,
+    "rumpun_cov70": 73.0,
+    "unk_n": 204,
+    "unk_top1": 67.6,
+    "unk_single_cov": 1.0,
+    "unk_rumpun_acc": 86.8
+   },
+   {
+    "cfg": "title|v27p|single",
+    "top1_inset": 82.61,
+    "cov70_single": 61.3,
+    "acc_single": 91.5,
+    "A_pair_cov": 28.6,
+    "A_pair_any": 95.0,
+    "A_pair_both": 41.1,
+    "A_rumpun_cov": 6.1,
+    "A_rumpun_acc": 91.3,
+    "A_rest": 4.0,
+    "B_rumpun_cov": 27.1,
+    "B_rumpun_acc": 96.9,
+    "B_pair_cov": 7.7,
+    "B_pair_any": 95.2,
+    "B_rest": 4.0,
+    "rumpun_top_acc": 94.78,
+    "rumpun_cov70": 88.3,
+    "unk_n": 204,
+    "unk_top1": 64.2,
+    "unk_single_cov": 28.9,
+    "unk_rumpun_acc": 88.7
+   },
+   {
+    "cfg": "title|v27p|weighted",
+    "top1_inset": 87.26,
+    "cov70_single": 22.5,
+    "acc_single": 97.8,
+    "A_pair_cov": 36.4,
+    "A_pair_any": 97.8,
+    "A_pair_both": 44.1,
+    "A_rumpun_cov": 26.1,
+    "A_rumpun_acc": 96.5,
+    "A_rest": 15.0,
+    "B_rumpun_cov": 52.7,
+    "B_rumpun_acc": 98.0,
+    "B_pair_cov": 9.8,
+    "B_pair_any": 98.0,
+    "B_rest": 15.0,
+    "rumpun_top_acc": 94.88,
+    "rumpun_cov70": 75.2,
+    "unk_n": 204,
+    "unk_top1": 69.6,
+    "unk_single_cov": 4.9,
+    "unk_rumpun_acc": 88.2
+   }
+  ],
+  "exp2_publisher": [
+   {
+    "cfg": "publisher|v26|single",
+    "top1_inset": 82.58,
+    "cov70_single": 56.5,
+    "acc_single": 92.2,
+    "A_pair_cov": 28.7,
+    "A_pair_any": 94.2,
+    "A_pair_both": 39.1,
+    "A_rumpun_cov": 8.4,
+    "A_rumpun_acc": 91.9,
+    "A_rest": 6.5,
+    "B_rumpun_cov": 28.0,
+    "B_rumpun_acc": 95.7,
+    "B_pair_cov": 9.0,
+    "B_pair_any": 94.2,
+    "B_rest": 6.5,
+    "rumpun_top_acc": 93.48,
+    "rumpun_cov70": 84.5,
+    "unk_n": 212,
+    "unk_top1": 60.8,
+    "unk_single_cov": 17.9,
+    "unk_rumpun_acc": 83.5
+   },
+   {
+    "cfg": "publisher|v26|weighted",
+    "top1_inset": 84.91,
+    "cov70_single": 21.2,
+    "acc_single": 98.1,
+    "A_pair_cov": 34.1,
+    "A_pair_any": 97.6,
+    "A_pair_both": 41.7,
+    "A_rumpun_cov": 25.9,
+    "A_rumpun_acc": 96.6,
+    "A_rest": 18.8,
+    "B_rumpun_cov": 50.7,
+    "B_rumpun_acc": 97.7,
+    "B_pair_cov": 9.2,
+    "B_pair_any": 98.0,
+    "B_rest": 18.8,
+    "rumpun_top_acc": 92.99,
+    "rumpun_cov70": 72.0,
+    "unk_n": 212,
+    "unk_top1": 65.6,
+    "unk_single_cov": 4.2,
+    "unk_rumpun_acc": 84.4
+   },
+   {
+    "cfg": "publisher|v27p|single",
+    "top1_inset": 82.86,
+    "cov70_single": 64.4,
+    "acc_single": 90.4,
+    "A_pair_cov": 26.6,
+    "A_pair_any": 93.2,
+    "A_pair_both": 39.7,
+    "A_rumpun_cov": 4.6,
+    "A_rumpun_acc": 90.7,
+    "A_rest": 4.4,
+    "B_rumpun_cov": 21.9,
+    "B_rumpun_acc": 96.7,
+    "B_pair_cov": 9.3,
+    "B_pair_any": 91.4,
+    "B_rest": 4.4,
+    "rumpun_top_acc": 94.31,
+    "rumpun_cov70": 86.3,
+    "unk_n": 212,
+    "unk_top1": 63.2,
+    "unk_single_cov": 31.1,
+    "unk_rumpun_acc": 86.3
+   },
+   {
+    "cfg": "publisher|v27p|weighted",
+    "top1_inset": 86.38,
+    "cov70_single": 27.2,
+    "acc_single": 97.6,
+    "A_pair_cov": 36.9,
+    "A_pair_any": 97.5,
+    "A_pair_both": 45.7,
+    "A_rumpun_cov": 21.7,
+    "A_rumpun_acc": 96.3,
+    "A_rest": 14.1,
+    "B_rumpun_cov": 47.6,
+    "B_rumpun_acc": 97.9,
+    "B_pair_cov": 11.1,
+    "B_pair_any": 97.0,
+    "B_rest": 14.1,
+    "rumpun_top_acc": 94.55,
+    "rumpun_cov70": 74.8,
+    "unk_n": 212,
+    "unk_top1": 69.8,
+    "unk_single_cov": 9.4,
+    "unk_rumpun_acc": 86.8
+   }
+  ],
+  "exp3_title_v26": {
+   "cfg": "title|v26|weighted+calib",
+   "n": 2990,
+   "label_correct": 89.9,
+   "conf_mean": 89.1,
+   "conf>=70": 100.0,
+   "single": {
+    "cov": 85.5,
+    "acc": 90.7,
+    "conf": 90.3
+   },
+   "pair": {
+    "cov": 14.5,
+    "acc": 85.2,
+    "conf": 82.5
+   },
+   "rumpun": {
+    "cov": 0.0,
+    "acc": null,
+    "conf": null
+   },
+   "low": {
+    "cov": 0.0,
+    "acc": null,
+    "conf": null
+   },
+   "pair_both": 33.9,
+   "top1_inset": 86.22,
+   "unk": {
+    "n": 204,
+    "label_correct": 78.4,
+    "top1": 67.6,
+    "stages": {
+     "single": 62.7,
+     "pair": 37.3,
+     "rumpun": 0.0,
+     "low": 0.0
+    }
+   },
+   "reliability": {
+    "0.7-0.8": [
+     75.7,
+     568
+    ],
+    "0.8-0.9": [
+     86.6,
+     701
+    ],
+    "0.9-1.0": [
+     95.9,
+     1721
+    ]
+   },
+   "secs": 131
+  },
+  "exp3_title_v27p": {
+   "cfg": "title|v27p|weighted+calib",
+   "n": 2990,
+   "label_correct": 89.6,
+   "conf_mean": 89.4,
+   "conf>=70": 100.0,
+   "single": {
+    "cov": 88.7,
+    "acc": 90.4,
+    "conf": 90.2
+   },
+   "pair": {
+    "cov": 11.2,
+    "acc": 83.0,
+    "conf": 82.5
+   },
+   "rumpun": {
+    "cov": 0.1,
+    "acc": 100.0,
+    "conf": 83.7
+   },
+   "low": {
+    "cov": 0.0,
+    "acc": null,
+    "conf": null
+   },
+   "pair_both": 36.4,
+   "top1_inset": 87.26,
+   "unk": {
+    "n": 204,
+    "label_correct": 75.0,
+    "top1": 69.6,
+    "stages": {
+     "single": 70.6,
+     "pair": 28.9,
+     "rumpun": 0.5,
+     "low": 0.0
+    }
+   },
+   "reliability": {
+    "0.7-0.8": [
+     75.6,
+     573
+    ],
+    "0.8-0.9": [
+     85.6,
+     770
+    ],
+    "0.9-1.0": [
+     96.4,
+     1647
+    ]
+   },
+   "secs": 207
+  },
+  "exp3_publisher_v27p": {
+   "cfg": "publisher|v27p|weighted+calib",
+   "n": 3267,
+   "label_correct": 88.61,
+   "conf_mean": 90.4,
+   "conf>=70": 100.0,
+   "single": {
+    "cov": 88.3,
+    "acc": 89.7,
+    "conf": 91.4
+   },
+   "pair": {
+    "cov": 11.4,
+    "acc": 79.9,
+    "conf": 82.6
+   },
+   "rumpun": {
+    "cov": 0.2,
+    "acc": 87.5,
+    "conf": 90.6
+   },
+   "low": {
+    "cov": 0.0,
+    "acc": 100.0,
+    "conf": 61.1
+   },
+   "pair_both": 35.6,
+   "top1_inset": 86.38,
+   "unk": {
+    "n": 212,
+    "label_correct": 75.9,
+    "top1": 69.8,
+    "stages": {
+     "single": 66.0,
+     "pair": 32.5,
+     "rumpun": 1.4,
+     "low": 0.0
+    }
+   },
+   "reliability": {
+    "0.7-0.8": [
+     71.9,
+     463
+    ],
+    "0.8-0.9": [
+     80.0,
+     726
+    ],
+    "0.9-1.0": [
+     95.3,
+     2077
+    ]
+   },
+   "secs": 204
+  }
+ },
+ "catatan": [
+  "Evaluasi subjek dijalankan lewat predict_batch layanan (tanpa subject_sinta) terhadap 20% data uji yang tidak dipakai melatih model maupun kalibrator.",
+  "Label benar: satu subjek -> termasuk subjek SINTA jurnal; dua subjek -> minimal satu termasuk; rumpun -> rumpun salah satu subjek SINTA.",
+  "Model tipe penerbit dan Scopus-27 sama dengan v2.6; metrik keduanya tetap merujuk evaluation_report_v2.6.json.",
+  "Keyakinan aturan bawaan penerbit independen (COM) = kecocokan dengan kolom tipe penerbit lama SINTA pada 513 jurnal sejenis.",
+  "hasil_16768_jurnal dibuat lewat POST /classify/predict dengan payload Data Mining (tanpa subject_sinta, dengan publisher_counts)."
+ ]
+}
